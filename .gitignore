@@ -1,2 +1,4 @@
 *.m~
 test_lmi_proj.m
+test_convexity_fenchel_implicit.m
+RandOrthMat.m
