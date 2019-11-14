@@ -49,7 +49,7 @@ classdef ImplicitDeepLearning
                 self.D=self.D-alpha_theta_2*grad_D;
                 self.E=self.E-alpha_theta_2*grad_E;
                 self.f=self.f-alpha_theta_2*grad_f;
-                self.X=self.X-alpha_X*grad_X;
+                self.X=max(0,self.X-alpha_X*grad_X);
             end
             
             % well posedness projection
