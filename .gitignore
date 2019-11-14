@@ -2,3 +2,5 @@
 test_lmi_proj.m
 test_convexity_fenchel_implicit.m
 RandOrthMat.m
+explore_implicit_prediction_rule.mlx
+test_implicit_deep_learning.m

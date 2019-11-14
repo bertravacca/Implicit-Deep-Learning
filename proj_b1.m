@@ -77,7 +77,7 @@ t1 = tic;
 % Optional input arguments
 if nargin<3, param=struct; end
 if ~isfield(param, 'epsilon'), param.epsilon = 1; end
-if ~isfield(param, 'verbose'), param.verbose = 1; end
+if ~isfield(param, 'verbose'), param.verbose = 0; end
 if ~isfield(param, 'weight'), param.weight = ones(size(x)); end
 
 if isfield(param,'w')
