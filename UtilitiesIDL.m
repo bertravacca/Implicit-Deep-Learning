@@ -13,34 +13,33 @@ classdef UtilitiesIDL
             end
         end
         
+        function X=picard_iterations(self,U,D,E,f)
+            [h,~]=size(D);
+            [~,m]=size(U);
+            X=rand(h,m)-0.5;
+            k=1;
+            while k<10^3 && norm(X-max(0,D*X+E*U+f*ones(1,m)),'fro')>self.precision
+                X=max(0,D*X+E*U+f*ones(1,m));
+                k=k+1;
+            end
+            if k>=10^3
+                disp('picard iterations were not able to find a solution X to the implicit model within 1,000 iterations')
+            end
+        end
+        
         function M=RandOrthMat(self,n)
-            % M = RANDORTHMAT(n)
-            % generates a random n x n orthogonal real matrix.
-            %
-            % M = RANDORTHMAT(n,tol)
-            % explicitly specifies a thresh value that measures linear dependence
-            % of a newly formed column with the existing columns. Defaults to 1e-6.
-            %
-            % In this version the generated matrix distribution *is* uniform over the manifold
-            % O(n) w.r.t. the induced R^(n^2) Lebesgue measure, at a slight computational
-            % overhead (randn + normalization, as opposed to rand ).
-            %
             % (c) Ofek Shilon , 2006.
             tol=self.precision;
             if nargin==1
                 tol=1e-6;
             end
-            
-            M = zeros(n); % prealloc
-            
+            M = zeros(n); 
             % gram-schmidt on random column vectors
-            
             vi = randn(n,1);
             % the n-dimensional normal distribution has spherical symmetry, which implies
             % that after normalization the drawn vectors would be uniformly distributed on the
             % n-dimensional unit sphere.
             M(:,1) = vi ./ norm(vi);
-            
             for i=2:n
                 nrm = 0;
                 while nrm<tol
@@ -52,5 +51,12 @@ classdef UtilitiesIDL
             end
         end
         
+    end
+    
+    methods(Static)
+        function out=RMSE(Y_1,Y_2)
+            [~,m]=size(Y_1);
+            out=(1/sqrt(m))*norm(Y_1-Y_2,'fro');
+        end
     end
 end
