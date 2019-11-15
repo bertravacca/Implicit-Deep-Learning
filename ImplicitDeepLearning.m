@@ -19,7 +19,7 @@ classdef ImplicitDeepLearning
         % precision used in the solver
         precision=10^-5;
         % dual variable for fenchel
-        lambda
+        lambda=0
         % well_posedness specification
         well_posedness='infty'
     end
@@ -31,29 +31,32 @@ classdef ImplicitDeepLearning
             self.h=h;
             [self.n,self.m]=size(U);
             [self.p,~]=size(Y);
-            self.lambda=self.precision*ones(h,1);
             %TODO: include checks of inputs   
         end
         
         function self=train(self)
             self=self.initialization;
             self.X=self.picard_iterations;
+            % initial implicit problem (lambda=0) start with (A,B,c,X)...
             for k=1:100
-                % compute gradients and step sizes
-                [grad_A,grad_B,grad_c,grad_D,grad_E,grad_f]=self.gradient_parameters;
+                [grad_A,grad_B,grad_c]=self.gradient_parameters_reg;
                 grad_X=self.gradient_hidden_var;
-                [alpha_theta_1,alpha_theta_2,alpha_X]=self.step_size;
-                self.A=self.A-alpha_theta_1*grad_A;
-                self.B=self.B-alpha_theta_1*grad_B;
-                self.c=self.c-alpha_theta_1*grad_c;
-                self.D=self.D-alpha_theta_2*grad_D;
-                self.E=self.E-alpha_theta_2*grad_E;
-                self.f=self.f-alpha_theta_2*grad_f;
-                self.X=max(0,self.X-alpha_X*grad_X);
+                step_theta_reg=self.step_size_parameters_reg;
+                step_X=self.step_size_X;
+                self.A=self.A-step_theta_reg*grad_A;
+                self.B=self.B-step_theta_reg*grad_B;
+                self.c=self.c-step_theta_reg*grad_c;
+                self.X=max(0,self.X-step_X*grad_X);
             end
             
-            % well posedness projection
-            self.D=self.infty_norm_projection(self.D);
+            % ... then continue with (D,E,f)
+            for k=1:100
+                [grad_D,grad_E,grad_f]=self.gradient_parameters_hid;
+                step_theta_hid=self.step_size_parameters_hid;
+                self.D=self.well_posedness_projection(self.D-step_theta_hid*grad_D);
+                self.E=self.E-step_theta_hid*grad_E;
+                self.f=self.f-step_theta_hid*grad_f;             
+            end
         end
         
         function X=picard_iterations(self,X)
@@ -70,28 +73,59 @@ classdef ImplicitDeepLearning
             end
         end
         
+        % gradients
         function grad_X=gradient_hidden_var(self)
-            grad_X=(1/self.m)*( self.A'*(self.A*self.X+self.B*self.input+self.c*ones(1,self.m))+ ...
-            (diag(self.lambda)-diag(self.lambda)*self.D-self.D'*diag(self.lambda))*self.X+ ...
-            self.D'*diag(self.lambda)*max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m))- ...
-            diag(self.lambda)*(self.E*self.input+self.f*ones(1,self.m)) );
+            if norm(self.lambda)>0
+                grad_X=(1/self.m)*( self.A'*(self.A*self.X+self.B*self.input+self.c*ones(1,self.m))+ ...
+                    (diag(self.lambda)-diag(self.lambda)*self.D-self.D'*diag(self.lambda))*self.X+ ...
+                    self.D'*diag(self.lambda)*max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m))- ...
+                    diag(self.lambda)*(self.E*self.input+self.f*ones(1,self.m)) );
+            else
+                 grad_X=(1/self.m)*( self.A'*(self.A*self.X+self.B*self.input+self.c*ones(1,self.m)));
+            end
         end
         
-        function [grad_A,grad_B,grad_c,grad_D,grad_E,grad_f]=gradient_parameters(self)
+        function [grad_A,grad_B,grad_c]=gradient_parameters_reg(self)
             Cst=(1/self.m)*(self.A*self.X+self.B*self.input+self.c*ones(1,self.m)-self.output);
             grad_A=Cst*self.X';
             grad_B=Cst*self.input';
             grad_c=Cst*ones(self.m,1);
-            Cst=diag(self.lambda)*(1/self.m)*(max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m))-self.X);
-            grad_D=Cst*self.X';
-            grad_E=Cst*self.input';
-            grad_f=Cst*ones(self.m,1);
         end
         
-        function [alpha_theta_1,alpha_theta_2,alpha_X]=step_size(self)
-            alpha_theta_1=self.m/max([self.m,norm(self.X)^2,norm(self.input)^2,norm(self.X*self.input')]);
-            alpha_theta_2=self.m/(max(self.lambda)*max([self.m,norm(self.X)^2,norm(self.input)^2,norm(self.input)*norm(self.X)]));
-            alpha_X=self.m/(norm(self.A'*self.A+diag(self.lambda)-diag(self.lambda)*self.D+self.D'*diag(self.lambda))+max(self.lambda)*norm(self.D)^2);
+        function [grad_D,grad_E,grad_f]=gradient_parameters_hid(self)
+            if norm(self.lambda)>0
+                Cst=diag(self.lambda)*(1/self.m)*(max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m))-self.X);
+                grad_D=Cst*self.X';
+                grad_E=Cst*self.input';
+                grad_f=Cst*ones(self.m,1);
+            else
+                Cst=(1/self.m)*(max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m))-self.X);
+                grad_D=Cst*self.X';
+                grad_E=Cst*self.input';
+                grad_f=Cst*ones(self.m,1);
+            end
+        end
+        
+        % step sizes
+     
+        function  out=step_size_parameters_reg(self)
+            out=self.m/max([self.m,norm(self.X)^2,norm(self.input)^2,norm(self.X*self.input')]);
+        end
+        
+        function  out=step_size_parameters_hid(self)
+            if norm(self.lambda)>0
+                out=self.m/(max(self.lambda)*max([self.m,norm(self.X)^2,norm(self.input)^2,norm(self.input)*norm(self.X)]));
+            else
+                out=self.m/(max([self.m,norm(self.X)^2,norm(self.input)^2,norm(self.input)*norm(self.X)]));
+            end
+        end
+        
+        function  out=step_size_X(self)
+            if norm(self.lambda)>0
+                out=self.m/(norm(self.A'*self.A+diag(self.lambda)-diag(self.lambda)*self.D+self.D'*diag(self.lambda))+max(self.lambda)*norm(self.D)^2);
+            else
+                out=self.m/(norm(self.A'*self.A));
+            end
         end
         
         function [A,D]=lmi_projection(self,A,D,lambda)
