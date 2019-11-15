@@ -58,5 +58,10 @@ classdef UtilitiesIDL
             [~,m]=size(Y_1);
             out=(1/sqrt(m))*norm(Y_1-Y_2,'fro');
         end
+        
+        function fval=scalar_fenchel_divergence(U,V)
+            [~,m]=size(U);
+            fval=(1/m)*(0.5*norm(U,'fro')^2+0.5*norm(max(0,V),'fro')^2-trace(U'*V));
+        end
     end
 end

@@ -1,14 +1,14 @@
 classdef ImplicitDeepLearning
     properties
-        input % input
-        output % output
+        U_train % input of training data
+        Y_train % output
         X %     hidden features
         h %     # of hidden variables
         m%     # of datapoints
         n %     # of features for the input
         p %     # of outputs
            %     the following matrices and vectors correspond to the implicit
-           %     prediction rule
+           %     prediction rule:
            %                            y=Ax+Bu+c; x=max(0,Dx+Eu+f)
         A 
         B
@@ -24,54 +24,56 @@ classdef ImplicitDeepLearning
         well_posedness='infty'
         fval_reg
         fval_fenchel_divergence
+        funcs
     end
     
     methods
-        function self=ImplicitDeepLearning(U,Y,h)
-            self.input=U;
-            self.output=Y;
-            self.h=h;
-            [self.n,self.m]=size(U);
-            [self.p,~]=size(Y);
+        function s=ImplicitDeepLearning(U,Y,h)
+            s.U_train=U;
+            s.Y_train=Y;
+            s.h=h;
+            [s.n,s.m]=size(U);
+            [s.p,~]=size(Y);
+            s.funcs=UtilitiesIDL;
             %TODO: include checks of inputs   
         end
         
-        function self=train(self)
-            self=self.initialization;
-            self.X=self.picard_iterations;
-            self.fval_reg=NaN*zeros(100,1);
+        function s=train(s)
+            s=s.initialization;
+            s.X=s.picard_iterations;
+            s.fval_reg=NaN*zeros(100,1);
             % initial implicit problem (lambda=0) start with (A,B,c,X)...
             for k=1:100
-                [grad_A,grad_B,grad_c]=self.gradient_parameters_reg;
-                grad_X=self.gradient_hidden_var;
-                step_theta_reg=self.step_size_parameters_reg;
-                step_X=self.step_size_X;
-                self.A=self.A-step_theta_reg*grad_A;
-                self.B=self.B-step_theta_reg*grad_B;
-                self.c=self.c-step_theta_reg*grad_c;
-                self.X=max(0,self.X-step_X*grad_X);
-                self.fval_reg(k)=self.objective_reg;
+                [grad_A,grad_B,grad_c]=s.gradient_parameters_reg;
+                grad_X=s.gradient_hidden_var;
+                step_theta_reg=s.step_size_parameters_reg;
+                step_X=s.step_size_X;
+                s.A=s.A-step_theta_reg*grad_A;
+                s.B=s.B-step_theta_reg*grad_B;
+                s.c=s.c-step_theta_reg*grad_c;
+                s.X=max(0,s.X-step_X*grad_X);
+                s.fval_reg(k)=s.objective_reg;
             end
             
             % ... then continue with (D,E,f)
-            self.fval_fenchel_divergence=NaN*zeros(200,1);
+            s.fval_fenchel_divergence=NaN*zeros(200,1);
             for k=1:200
-                [grad_D,grad_E,grad_f]=self.gradient_parameters_hid;
-                step_theta_hid=self.step_size_parameters_hid;
-                self.D=self.well_posedness_projection(self.D-step_theta_hid*grad_D);
-                self.E=self.E-step_theta_hid*grad_E;
-                self.f=self.f-step_theta_hid*grad_f;   
-                self.fval_fenchel_divergence(k)=self.objective_scalar_fenchel_divergence;
+                [grad_D,grad_E,grad_f]=s.gradient_parameters_hid;
+                step_theta_hid=s.step_size_parameters_hid;
+                s.D=s.well_posedness_projection(s.D-step_theta_hid*grad_D);
+                s.E=s.E-step_theta_hid*grad_E;
+                s.f=s.f-step_theta_hid*grad_f;   
+                s.fval_fenchel_divergence(k)=s.funcs.scalar_fenchel_divergence(s.X,s.D*s.X+s.E*s.U_train+s.f*ones(1,s.m));
             end
         end
         
-        function X=picard_iterations(self,X)
+        function X=picard_iterations(s,X)
             if nargin==1
-                X=rand(self.h,self.m);
+                X=rand(s.h,s.m);
             end
             k=1;
-            while k<10^3 && norm(X-max(0,self.D*X+self.E*self.input+self.f*ones(1,self.m)),'fro')>self.precision
-                X=max(0,self.D*X+self.E*self.input+self.f*ones(1,self.m));
+            while k<10^3 && norm(X-max(0,s.D*X+s.E*s.U_train+s.f*ones(1,s.m)),'fro')>s.precision
+                X=max(0,s.D*X+s.E*s.U_train+s.f*ones(1,s.m));
                 k=k+1;
             end
             if k>=10^3
@@ -80,76 +82,72 @@ classdef ImplicitDeepLearning
         end
         
         % gradients
-        function grad_X=gradient_hidden_var(self)
-            if norm(self.lambda)>0
-                grad_X=(1/self.m)*( self.A'*(self.A*self.X+self.B*self.input+self.c*ones(1,self.m))+ ...
-                    (diag(self.lambda)-diag(self.lambda)*self.D-self.D'*diag(self.lambda))*self.X+ ...
-                    self.D'*diag(self.lambda)*max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m))- ...
-                    diag(self.lambda)*(self.E*self.input+self.f*ones(1,self.m)) );
+        function grad_X=gradient_hidden_var(s)
+            if norm(s.lambda)>0
+                grad_X=(1/s.m)*( s.A'*(s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m))+ ...
+                    (diag(s.lambda)-diag(s.lambda)*s.D-s.D'*diag(s.lambda))*s.X+ ...
+                    s.D'*diag(s.lambda)*max(0,s.D*s.X+s.E*s.U_train+s.f*ones(1,s.m))- ...
+                    diag(s.lambda)*(s.E*s.U_train+s.f*ones(1,s.m)) );
             else
-                 grad_X=(1/self.m)*( self.A'*(self.A*self.X+self.B*self.input+self.c*ones(1,self.m)));
+                 grad_X=(1/s.m)*( s.A'*(s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m)));
             end
         end
         
-        function [grad_A,grad_B,grad_c]=gradient_parameters_reg(self)
-            Cst=(1/self.m)*(self.A*self.X+self.B*self.input+self.c*ones(1,self.m)-self.output);
-            grad_A=Cst*self.X';
-            grad_B=Cst*self.input';
-            grad_c=Cst*ones(self.m,1);
+        function [grad_A,grad_B,grad_c]=gradient_parameters_reg(s)
+            Cst=(1/s.m)*(s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m)-s.Y_train);
+            grad_A=Cst*s.X';
+            grad_B=Cst*s.U_train';
+            grad_c=Cst*ones(s.m,1);
         end
         
-        function [grad_D,grad_E,grad_f]=gradient_parameters_hid(self)
-            if norm(self.lambda)>0
-                Cst=diag(self.lambda)*(1/self.m)*(max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m))-self.X);
-                grad_D=Cst*self.X';
-                grad_E=Cst*self.input';
-                grad_f=Cst*ones(self.m,1);
+        function [grad_D,grad_E,grad_f]=gradient_parameters_hid(s)
+            if norm(s.lambda)>0
+                Cst=diag(s.lambda)*(1/s.m)*(max(0,s.D*s.X+s.E*s.U_train+s.f*ones(1,s.m))-s.X);
+                grad_D=Cst*s.X';
+                grad_E=Cst*s.U_train';
+                grad_f=Cst*ones(s.m,1);
             else
-                Cst=(1/self.m)*(max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m))-self.X);
-                grad_D=Cst*self.X';
-                grad_E=Cst*self.input';
-                grad_f=Cst*ones(self.m,1);
+                Cst=(1/s.m)*(max(0,s.D*s.X+s.E*s.U_train+s.f*ones(1,s.m))-s.X);
+                grad_D=Cst*s.X';
+                grad_E=Cst*s.U_train';
+                grad_f=Cst*ones(s.m,1);
             end
         end
         
         % step sizes
      
-        function  out=step_size_parameters_reg(self)
-            out=self.m/max([self.m,norm(self.X)^2,norm(self.input)^2,norm(self.X*self.input')]);
+        function  out=step_size_parameters_reg(s)
+            out=s.m/max([s.m,norm(s.X)^2,norm(s.U_train)^2,norm(s.X*s.U_train')]);
         end
         
-        function  out=step_size_parameters_hid(self)
-            if norm(self.lambda)>0
-                out=self.m/(max(self.lambda)*max([self.m,norm(self.X)^2,norm(self.input)^2,norm(self.input)*norm(self.X)]));
+        function  out=step_size_parameters_hid(s)
+            if norm(s.lambda)>0
+                out=s.m/(max(s.lambda)*max([s.m,norm(s.X)^2,norm(s.U_train)^2,norm(s.U_train)*norm(s.X)]));
             else
-                out=self.m/(max([self.m,norm(self.X)^2,norm(self.input)^2,norm(self.input)*norm(self.X)]));
+                out=s.m/(max([s.m,norm(s.X)^2,norm(s.U_train)^2,norm(s.U_train)*norm(s.X)]));
             end
         end
         
-        function  out=step_size_X(self)
-            if norm(self.lambda)>0
-                out=self.m/(norm(self.A'*self.A+diag(self.lambda)-diag(self.lambda)*self.D+self.D'*diag(self.lambda))+max(self.lambda)*norm(self.D)^2);
+        function  out=step_size_X(s)
+            if norm(s.lambda)>0
+                out=s.m/(norm(s.A'*s.A+diag(s.lambda)-diag(s.lambda)*s.D+s.D'*diag(s.lambda))+max(s.lambda)*norm(s.D)^2);
             else
-                out=self.m/(norm(self.A'*self.A));
+                out=s.m/(norm(s.A'*s.A));
             end
         end
         
-        function fval=objective_reg(self)
-            fval=(1/sqrt(self.m))*norm(self.A*self.X+self.B*self.input+self.c*ones(1,self.m)-self.output,'fro');
+        function fval=objective_reg(s)
+            fval=(1/sqrt(s.m))*norm(s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m)-s.Y_train,'fro');
         end
         
-        function fval=objective_scalar_fenchel_divergence(self)
-            fval=(1/sqrt(self.m))*sqrt(0.5*norm(self.X,'fro')^2+0.5*norm(max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m)),'fro')-trace(self.X'*(self.D*self.X+self.E*self.input+self.f*ones(1,self.m))));
-        end
-        
-        function [A,D]=lmi_projection(self,A,D,lambda)
+        function [A,D]=lmi_projection(s,A,D,lambda)
             if norm(lambda)>0
                 A_init=A;
                 D_init=D;
                 Lam=diag(lambda);
-                h=self.h;
-                p=self.p;
-                prec=self.precision;
+                h=s.h;
+                p=s.p;
+                prec=s.precision;
                 cvx_begin sdp quiet
                 variables A(p,h)
                 variables D(h,h)
@@ -160,27 +158,27 @@ classdef ImplicitDeepLearning
             end
         end
         
-        function D=infty_norm_projection(self,D)
-            for j=1:self.h
-                D(j,:)=(1-self.precision)*proj_b1(1/(1-self.precision)*D(j,:));
+        function D=infty_norm_projection(s,D)
+            for j=1:s.h
+                D(j,:)=(1-s.precision)*proj_b1(1/(1-s.precision)*D(j,:));
             end
         end
         
-        function D=well_posedness_projection(self,D)
-            if strcmp(self.well_posedness,'infty')
-                D=self.infty_norm_projection(D);
-            elseif strcmp(self.well_posedness,'LMI')
-                D=self.lmi_projection(self.A,D,self.lambda);
+        function D=well_posedness_projection(s,D)
+            if strcmp(s.well_posedness,'infty')
+                D=s.infty_norm_projection(D);
+            elseif strcmp(s.well_posedness,'LMI')
+                D=s.lmi_projection(s.A,D,s.lambda);
             end
         end
         
-        function self=initialization(self)
-            self.A=rand(self.p,self.h)-0.5;
-            self.B=rand(self.p,self.n)-0.5;
-            self.c=rand(self.p,1)-0.5;
-            self.D=self.well_posedness_projection(rand(self.h,self.h)-0.5);
-            self.E=rand(self.h,self.n)-0.5;
-            self.f=rand(self.h,1)-0.5;
+        function s=initialization(s)
+            s.A=rand(s.p,s.h)-0.5;
+            s.B=rand(s.p,s.n)-0.5;
+            s.c=rand(s.p,1)-0.5;
+            s.D=s.well_posedness_projection(rand(s.h,s.h)-0.5);
+            s.E=rand(s.h,s.n)-0.5;
+            s.f=rand(s.h,1)-0.5;
         end
   
     end
