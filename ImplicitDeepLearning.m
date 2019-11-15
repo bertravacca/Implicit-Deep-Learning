@@ -40,18 +40,27 @@ classdef ImplicitDeepLearning
             s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
             s.fval_reg = NaN*zeros(100,1);
             % initial implicit problem (lambda=0) start with (A,B,c,X)...
-            for k = 1:100
-                [grad_A, grad_B, grad_c] = s.gradient_parameters_reg;
-                grad_X = s.gradient_hidden_var;
-                step_theta_reg = s.step_size_parameters_reg;
-                step_X = s.step_size_X;
-                s.A = s.A-step_theta_reg*grad_A;
-                s.B = s.B - step_theta_reg*grad_B;
-                s.c = s.c - step_theta_reg*grad_c;
-                s.X = max(0, s.X - step_X*grad_X);
-                s.fval_reg(k) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
-            end
-            
+            %for k = 1:100
+              %  [grad_A, grad_B, grad_c] = s.gradient_parameters_reg;
+              %  grad_X = s.gradient_hidden_var;
+               % step_theta_reg = s.step_size_parameters_reg;
+                %step_X = s.step_size_X;
+                %s.A = s.A-step_theta_reg*grad_A;
+                %s.B = s.B - step_theta_reg*grad_B;
+                %s.c = s.c - step_theta_reg*grad_c;
+                %s.X = max(0, s.X - step_X*grad_X);
+                %s.fval_reg(k) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
+                %end
+                for k=1:5
+                    [s.A,s.B,s.c]=s.direct_update_parameters_reg;
+                    for j=1:100
+                        grad_X = s.gradient_hidden_var;
+                        step_X = s.step_size_X;
+                        s.X = max(0, s.X - step_X*grad_X);
+                        s.fval_reg(k) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
+                    end
+                end
+                
             % ... then continue with (D,E,f)
             s.fval_fenchel_divergence = NaN*zeros(200,1);
             for k = 1:200
@@ -135,6 +144,13 @@ classdef ImplicitDeepLearning
             s.E = rand(s.h, s.n)-0.5;
             s.f = rand(s.h, 1)-0.5;
         end
-  
+        
+        % direct updates
+        
+        function [A,B,c]=direct_update_parameters_reg(s)
+            Z=[s.X;s.U_train;ones(1,s.m)];
+            Theta=s.Y_train*Z'/(Z*Z'+s.precision*eye(s.h+s.n+1));
+            A=Theta(:,1:s.h); B=Theta(:,s.h+1:s.h+s.n); c=Theta(:,s.h+s.n+1);
+        end
     end
 end
