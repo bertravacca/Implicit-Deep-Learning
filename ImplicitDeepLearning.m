@@ -22,6 +22,8 @@ classdef ImplicitDeepLearning
         lambda=0
         % well_posedness specification
         well_posedness='infty'
+        fval_reg
+        fval_fenchel_divergence
     end
     
     methods
@@ -37,6 +39,7 @@ classdef ImplicitDeepLearning
         function self=train(self)
             self=self.initialization;
             self.X=self.picard_iterations;
+            self.fval_reg=NaN*zeros(100,1);
             % initial implicit problem (lambda=0) start with (A,B,c,X)...
             for k=1:100
                 [grad_A,grad_B,grad_c]=self.gradient_parameters_reg;
@@ -47,15 +50,18 @@ classdef ImplicitDeepLearning
                 self.B=self.B-step_theta_reg*grad_B;
                 self.c=self.c-step_theta_reg*grad_c;
                 self.X=max(0,self.X-step_X*grad_X);
+                self.fval_reg(k)=self.objective_reg;
             end
             
             % ... then continue with (D,E,f)
-            for k=1:100
+            self.fval_fenchel_divergence=NaN*zeros(200,1);
+            for k=1:200
                 [grad_D,grad_E,grad_f]=self.gradient_parameters_hid;
                 step_theta_hid=self.step_size_parameters_hid;
                 self.D=self.well_posedness_projection(self.D-step_theta_hid*grad_D);
                 self.E=self.E-step_theta_hid*grad_E;
-                self.f=self.f-step_theta_hid*grad_f;             
+                self.f=self.f-step_theta_hid*grad_f;   
+                self.fval_fenchel_divergence(k)=self.objective_scalar_fenchel_divergence;
             end
         end
         
@@ -126,6 +132,14 @@ classdef ImplicitDeepLearning
             else
                 out=self.m/(norm(self.A'*self.A));
             end
+        end
+        
+        function fval=objective_reg(self)
+            fval=(1/sqrt(self.m))*norm(self.A*self.X+self.B*self.input+self.c*ones(1,self.m)-self.output,'fro');
+        end
+        
+        function fval=objective_scalar_fenchel_divergence(self)
+            fval=(1/sqrt(self.m))*sqrt(0.5*norm(self.X,'fro')^2+0.5*norm(max(0,self.D*self.X+self.E*self.input+self.f*ones(1,self.m)),'fro')-trace(self.X'*(self.D*self.X+self.E*self.input+self.f*ones(1,self.m))));
         end
         
         function [A,D]=lmi_projection(self,A,D,lambda)
