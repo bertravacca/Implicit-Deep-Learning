@@ -4,21 +4,41 @@ classdef UtilitiesIDL
         precision=10^-6;
     end
     methods
-        function self=UtilitiesIDL
+        % constructor
+        function s=UtilitiesIDL
         end
-        function D=infty_norm_projection(self,D)
+        
+        function D=infty_norm_projection(s,D)
             [h,~]=size(D);
             for j=1:h
-                D(j,:)=(1-self.wp_precision)*proj_b1(1/(1-self.wp_precision)*D(j,:));
+                D(j,:)=(1-s.wp_precision)*proj_b1(1/(1-s.wp_precision)*D(j,:));
             end
         end
         
-        function X=picard_iterations(self,U,D,E,f)
+        function [A,D]=lmi_projection(s,A,D,lambda)
+            if norm(lambda)>0
+                A_init=A;
+                D_init=D;
+                Lam=diag(lambda);
+                [h,~]=size(D);
+                [p,~]=size(A);
+                prec=s.wp_precision;
+                cvx_begin sdp quiet
+                variables A(p,h)
+                variables D(h,h)
+                minimize(norm([A;D]-[A_init;D_init]))
+                Lam*D+D'*Lam<=Lam+A'*A
+                norm(D)<=1-prec
+                cvx_end
+            end
+        end
+        
+        function X=picard_iterations(s,U,D,E,f)
             [h,~]=size(D);
             [~,m]=size(U);
             X=rand(h,m)-0.5;
             k=1;
-            while k<10^3 && norm(X-max(0,D*X+E*U+f*ones(1,m)),'fro')>self.precision
+            while k<10^3 && norm(X-max(0,D*X+E*U+f*ones(1,m)),'fro')>s.precision
                 X=max(0,D*X+E*U+f*ones(1,m));
                 k=k+1;
             end
@@ -27,9 +47,9 @@ classdef UtilitiesIDL
             end
         end
         
-        function M=RandOrthMat(self,n)
+        function M=RandOrthMat(s,n)
             % (c) Ofek Shilon , 2006.
-            tol=self.precision;
+            tol=s.precision;
             if nargin==1
                 tol=1e-6;
             end
@@ -54,14 +74,21 @@ classdef UtilitiesIDL
     end
     
     methods(Static)
+        
         function out=RMSE(Y_1,Y_2)
             [~,m]=size(Y_1);
             out=(1/sqrt(m))*norm(Y_1-Y_2,'fro');
+        end
+        
+        function fval=MSE_implicit_objective(X,A,B,c,U,Y)
+            [~,m]=size(U);
+            fval=(1/m)*norm(A*X+B*U+c*ones(1,m)-Y,'fro')^2;
         end
         
         function fval=scalar_fenchel_divergence(U,V)
             [~,m]=size(U);
             fval=(1/m)*(0.5*norm(U,'fro')^2+0.5*norm(max(0,V),'fro')^2-trace(U'*V));
         end
+        
     end
 end
