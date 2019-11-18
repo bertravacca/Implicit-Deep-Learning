@@ -76,6 +76,11 @@ classdef UtilitiesIDL
             X=s.picard_iterations(U,D,E,f);
             out=sqrt(s.MSE_implicit_objective(X,A,B,c,U,Y));
         end
+            
+        function fval = implicit_objective(s,X, A, B, c, D, E, f, U, Y, lambda)
+             [h,m]=size(X);
+            fval = s.MSE_implicit_objective(X, A, B, c, U, Y)+(lambda.*ones(h,1))'* s.fenchel_divergence(X, D*X+E*U+f*ones(1,m));
+        end
         
     end
     
@@ -100,10 +105,6 @@ classdef UtilitiesIDL
         function fval = fenchel_divergence(U, V)
             [~,m]=size(U);
             fval=(1/m)*(0.5*sum(U,2).^2+0.5*sum(max(0,V),2).^2-sum(U.*V,2));
-        end
-        
-        function fval=implicit_objective(X, A, B, c, D, E, f, U, Y, lambda)
-            fval=MSE_implicit_objective(X, A, B, c, U, Y)+lambda'* fenchel_divergence(X, D*X+E*U+f*ones(1,m));
         end
         
     end

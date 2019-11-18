@@ -23,6 +23,8 @@ classdef ImplicitDeepLearning
         m                  % # of datapoints
         n                   % # of features for the input
         p                   % # of outputs
+        additional_info
+        harpagon = 1
     end
     
     methods
@@ -33,7 +35,10 @@ classdef ImplicitDeepLearning
             [s.n,s.m] = size(U);
             [s.p,~] = size(Y);
             s.utils = UtilitiesIDL;
-            %TODO: include checks of inputs   
+            %TODO: include checks of inputs
+            if s.harpagon == 1
+                s.additional_info = struc('fval_X',[]);
+            end
         end
          
         function s=train(s)
@@ -42,20 +47,22 @@ classdef ImplicitDeepLearning
         
         function s = initial_train(s)
             s = s.parameter_initialization;
-            num_iter_bcd=5;
+            num_iter_bcd=2;
             s.fval_reg = NaN*zeros(100,1);
             s.rmse = NaN*zeros(100,1);
             %% Initial training
             % initial implicit problem (lambda=0) start with (A,B,c,X)...
             
             for iter_bcd=1:num_iter_bcd
-                s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
-                s = s.block_update_regParameters;
-                s = s.block_update_X(500);
-                s = s.block_update_HiddenParameters(500);
-                s.fval_reg(iter_bcd) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
-                s.rmse(iter_bcd) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
-                s.fval_fenchel_divergence(iter_bcd) = s.utils.scalar_fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1,s.m));
+                if s.harpagon ==1
+                    s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
+                    s = s.block_update_regParameters;
+                    [s, s.additional_info.fval_X] = s.block_update_X(500);
+                    s = s.block_update_HiddenParameters(500);
+                    s.fval_reg(iter_bcd) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
+                    s.rmse(iter_bcd) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
+                    s.fval_fenchel_divergence(iter_bcd) = s.utils.scalar_fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1,s.m));     
+                end
             end
         end
         
@@ -81,11 +88,12 @@ classdef ImplicitDeepLearning
         end
         
         function  [s, info] = block_update_X(s,num_iter)
-            info =NaN*zeros(num_iter,1);
+            info =NaN*zeros(num_iter+1,1);
             for inner_iter = 1:num_iter
                 grad_X = s.gradient_hidden_var;
                 step_X = s.step_size_X;
                 s.X = max(0, s.X - step_X*grad_X);
+                info(inner_iter+1)= s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
             end
         end
         
