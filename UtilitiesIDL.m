@@ -71,15 +71,22 @@ classdef UtilitiesIDL
             end
         end
         
+        % compute the MSE given model parameters
+        function out=RMSE_actual_implicit(s,A,B,c,D,E,f,U,Y)
+            X=s.picard_iterations(U,D,E,f);
+            out=sqrt(s.MSE_implicit_objective(X,A,B,c,U,Y));
+        end
+        
     end
     
     methods(Static)
-        
+        % just compute RMSE
         function out=RMSE(Y_1,Y_2)
             [~,m]=size(Y_1);
             out=(1/sqrt(m))*norm(Y_1-Y_2,'fro');
         end
         
+        % compute the MSE, given X (not considering satisfaction of the implicit constraint)
         function fval=MSE_implicit_objective(X,A,B,c,U,Y)
             [~,m]=size(U);
             fval=(1/m)*norm(A*X+B*U+c*ones(1,m)-Y,'fro')^2;

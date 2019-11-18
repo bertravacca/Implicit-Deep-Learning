@@ -5,6 +5,7 @@ classdef ImplicitDeepLearning
         well_posedness = 'infty'    % well_posedness specification
         fval_reg
         fval_fenchel_divergence
+        rmse
         utils
         %  The following matrices and vectors correspond to the implicit
         %   prediction rule:
@@ -37,31 +38,20 @@ classdef ImplicitDeepLearning
         
         function s=train(s)
             s = s.parameter_initialization;
-            s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
+            num_iter_bcd=5;
             s.fval_reg = NaN*zeros(100,1);
+            s.rmse = NaN*zeros(100,1);
+            %% Initial training
             % initial implicit problem (lambda=0) start with (A,B,c,X)...
-            for k = 1:100
-                [grad_A, grad_B, grad_c] = s.gradient_parameters_reg;
-                grad_X = s.gradient_hidden_var;
-                step_theta_reg = s.step_size_parameters_reg;
-                step_X = s.step_size_X;
-                s.A = s.A-step_theta_reg*grad_A;
-                s.B = s.B - step_theta_reg*grad_B;
-                s.c = s.c - step_theta_reg*grad_c;
-                s.X = max(0, s.X - step_X*grad_X);
-                s.fval_reg(k) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
-            end
-            cond=0;
-            if cond>0
-                for k=1:5
-                    [s.A,s.B,s.c]=s.direct_update_parameters_reg;
-                    for j=1:100
-                        grad_X = s.gradient_hidden_var;
-                        step_X = s.step_size_X;
-                        s.X = max(0, s.X - step_X*grad_X);
-                        s.fval_reg(k) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
-                    end
-                end
+            
+            for iter_bcd=1:num_iter_bcd
+                s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
+                s = s.block_update_regParameters;
+                s = s.block_update_X(500);
+                s = s.block_update_HiddenParameters(500);
+                s.fval_reg(iter_bcd) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
+                s.rmse(iter_bcd) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
+                s.fval_fenchel_divergence(iter_bcd) = s.utils.scalar_fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1,s.m));
             end
             
             % ... then continue with (D,E,f)
@@ -71,8 +61,46 @@ classdef ImplicitDeepLearning
                 step_theta_hid = 2*s.step_size_parameters_hid;
                 s.D = s.well_posedness_projection(s.D-step_theta_hid*grad_D);
                 s.E = s.E - step_theta_hid*grad_E;
-                s.f = s.f - step_theta_hid*grad_f;   
+                s.f = s.f - step_theta_hid*grad_f;
                 s.fval_fenchel_divergence(k) = s.utils.scalar_fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1,s.m));
+            end
+        end
+        
+        % algorithms
+        function s = block_update_X_regParameters(s,num_iter)
+            for k = 1:num_iter
+                [grad_A, grad_B, grad_c] = s.gradient_parameters_reg;
+                grad_X = s.gradient_hidden_var;
+                step_theta_reg = s.step_size_parameters_reg;
+                step_X = s.step_size_X;
+                s.A = s.A-step_theta_reg*grad_A;
+                s.B = s.B - step_theta_reg*grad_B;
+                s.c = s.c - step_theta_reg*grad_c;
+                s.X = max(0, s.X - step_X*grad_X);
+            end
+        end
+        
+        function s = block_update_regParameters(s)
+            Z=[s.X;s.U_train;ones(1,s.m)];
+            Theta=s.Y_train*Z'/(Z*Z'+s.precision*eye(s.h+s.n+1));
+            s.A=Theta(:,1:s.h); s.B=Theta(:,s.h+1:s.h+s.n); s.c=Theta(:,s.h+s.n+1);
+        end
+        
+        function  s = block_update_X(s,num_iter)
+            for inner_iter = 1:num_iter
+                grad_X = s.gradient_hidden_var;
+                step_X = s.step_size_X;
+                s.X = max(0, s.X - step_X*grad_X);
+            end
+        end
+        
+        function s=block_update_HiddenParameters(s,num_iter)
+            for k = 1:num_iter
+                [grad_D, grad_E, grad_f] = s.gradient_parameters_hid;
+                step_theta_hid = 2*s.step_size_parameters_hid;
+                s.D = s.well_posedness_projection(s.D-step_theta_hid*grad_D);
+                s.E = s.E - step_theta_hid*grad_E;
+                s.f = s.f - step_theta_hid*grad_f;
             end
         end
         
@@ -148,12 +176,6 @@ classdef ImplicitDeepLearning
             s.f = rand(s.h, 1)-0.5;
         end
         
-        % direct updates
-        
-        function [A,B,c]=direct_update_parameters_reg(s)
-            Z=[s.X;s.U_train;ones(1,s.m)];
-            Theta=s.Y_train*Z'/(Z*Z'+s.precision*eye(s.h+s.n+1));
-            A=Theta(:,1:s.h); B=Theta(:,s.h+1:s.h+s.n); c=Theta(:,s.h+s.n+1);
-        end
+
     end
 end
