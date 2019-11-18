@@ -35,8 +35,12 @@ classdef ImplicitDeepLearning
             s.utils = UtilitiesIDL;
             %TODO: include checks of inputs   
         end
-        
+         
         function s=train(s)
+
+        end
+        
+        function s = initial_train(s)
             s = s.parameter_initialization;
             num_iter_bcd=5;
             s.fval_reg = NaN*zeros(100,1);
@@ -52,17 +56,6 @@ classdef ImplicitDeepLearning
                 s.fval_reg(iter_bcd) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
                 s.rmse(iter_bcd) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
                 s.fval_fenchel_divergence(iter_bcd) = s.utils.scalar_fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1,s.m));
-            end
-            
-            % ... then continue with (D,E,f)
-            s.fval_fenchel_divergence = NaN*zeros(1000,1);
-            for k = 1:1000
-                [grad_D, grad_E, grad_f] = s.gradient_parameters_hid;
-                step_theta_hid = 2*s.step_size_parameters_hid;
-                s.D = s.well_posedness_projection(s.D-step_theta_hid*grad_D);
-                s.E = s.E - step_theta_hid*grad_E;
-                s.f = s.f - step_theta_hid*grad_f;
-                s.fval_fenchel_divergence(k) = s.utils.scalar_fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1,s.m));
             end
         end
         
@@ -80,13 +73,15 @@ classdef ImplicitDeepLearning
             end
         end
         
-        function s = block_update_regParameters(s)
+        function [s, info] = block_update_regParameters(s)
             Z=[s.X;s.U_train;ones(1,s.m)];
             Theta=s.Y_train*Z'/(Z*Z'+s.precision*eye(s.h+s.n+1));
             s.A=Theta(:,1:s.h); s.B=Theta(:,s.h+1:s.h+s.n); s.c=Theta(:,s.h+s.n+1);
+            info = s.utils.MSE_implicit_objective(s.X,s.A,s.B,s.c,s.U_train,s.Y_train);
         end
         
-        function  s = block_update_X(s,num_iter)
+        function  [s, info] = block_update_X(s,num_iter)
+            info =NaN*zeros(num_iter,1);
             for inner_iter = 1:num_iter
                 grad_X = s.gradient_hidden_var;
                 step_X = s.step_size_X;

@@ -81,20 +81,29 @@ classdef UtilitiesIDL
     
     methods(Static)
         % just compute RMSE
-        function out=RMSE(Y_1,Y_2)
+        function out=RMSE(Y_1, Y_2)
             [~,m]=size(Y_1);
             out=(1/sqrt(m))*norm(Y_1-Y_2,'fro');
         end
         
         % compute the MSE, given X (not considering satisfaction of the implicit constraint)
-        function fval=MSE_implicit_objective(X,A,B,c,U,Y)
+        function fval=MSE_implicit_objective(X, A, B, c, U, Y)
             [~,m]=size(U);
             fval=(1/m)*norm(A*X+B*U+c*ones(1,m)-Y,'fro')^2;
         end
         
-        function fval=scalar_fenchel_divergence(U,V)
+        function fval=scalar_fenchel_divergence(U, V)
             [~,m]=size(U);
             fval=(1/m)*(0.5*norm(U,'fro')^2+0.5*norm(max(0,V),'fro')^2-trace(U'*V));
+        end
+        
+        function fval = fenchel_divergence(U, V)
+            [~,m]=size(U);
+            fval=(1/m)*(0.5*sum(U,2).^2+0.5*sum(max(0,V),2).^2-sum(U.*V,2));
+        end
+        
+        function fval=implicit_objective(X, A, B, c, D, E, f, U, Y, lambda)
+            fval=MSE_implicit_objective(X, A, B, c, U, Y)+lambda'* fenchel_divergence(X, D*X+E*U+f*ones(1,m));
         end
         
     end
