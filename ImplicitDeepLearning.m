@@ -37,7 +37,7 @@ classdef ImplicitDeepLearning
             s.utils = UtilitiesIDL;
             %TODO: include checks of inputs
             if s.harpagon == 1
-                s.additional_info = struc('fval_X',[]);
+                s.additional_info = struc('fval_X',[],'diff_X');
             end
         end
          
@@ -52,16 +52,19 @@ classdef ImplicitDeepLearning
             s.rmse = NaN*zeros(100,1);
             %% Initial training
             % initial implicit problem (lambda=0) start with (A,B,c,X)...
-            
-            for iter_bcd=1:num_iter_bcd
-                if s.harpagon ==1
+            num_iter_X = 500;
+            if s.harpagon ==1
+                s.additional_info.fval_X = NaN*zeros(num_iter_X+1, num_iter_bcd);
+                s.additional_info.diff_X = NaN*zeros(num_iter_bcd,1);
+                for iter_bcd=1:num_iter_bcd
+                    % updates
                     s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
                     s = s.block_update_regParameters;
-                    [s, s.additional_info.fval_X] = s.block_update_X(500);
+                    [s, s.additional_info.fval_X(:,iter_bcd), s.additional_info.diff_X(iter_bcd)] = s.block_update_X(num_iter_X);
                     s = s.block_update_HiddenParameters(500);
                     s.fval_reg(iter_bcd) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
                     s.rmse(iter_bcd) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
-                    s.fval_fenchel_divergence(iter_bcd) = s.utils.scalar_fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1,s.m));     
+                    s.fval_fenchel_divergence(iter_bcd) = s.utils.scalar_fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1,s.m));
                 end
             end
         end
@@ -87,14 +90,17 @@ classdef ImplicitDeepLearning
             info = s.utils.MSE_implicit_objective(s.X,s.A,s.B,s.c,s.U_train,s.Y_train);
         end
         
-        function  [s, info] = block_update_X(s,num_iter)
-            info =NaN*zeros(num_iter+1,1);
+        function  [s, fvals, diff] = block_update_X(s,num_iter)
+            fvals = NaN*zeros(num_iter+1,1);
+            fvals(1) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
+            X_prev = s.X;
             for inner_iter = 1:num_iter
                 grad_X = s.gradient_hidden_var;
                 step_X = s.step_size_X;
                 s.X = max(0, s.X - step_X*grad_X);
-                info(inner_iter+1)= s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
+                fvals(inner_iter+1) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
             end
+            diff = norm(s.X - X_prev, 'fro');
         end
         
         function s=block_update_HiddenParameters(s,num_iter)
@@ -171,14 +177,13 @@ classdef ImplicitDeepLearning
         end
         
         function s = parameter_initialization(s)
-            s.A = rand(s.p, s.h)-0.5;
-            s.B  =rand(s.p, s.n)-0.5;
-            s.c = rand(s.p, 1)-0.5;
-            s.D = s.well_posedness_projection(rand(s.h,s.h)-0.5);
-            s.E = rand(s.h, s.n)-0.5;
-            s.f = rand(s.h, 1)-0.5;
+            s.A = rand(s.p, s.h) - 0.5;
+            s.B  =rand(s.p, s.n) - 0.5;
+            s.c = rand(s.p, 1) - 0.5;
+            s.D = s.well_posedness_projection(rand(s.h,s.h) - 0.5);
+            s.E = rand(s.h, s.n) - 0.5;
+            s.f = rand(s.h, 1) - 0.5;
         end
         
-
     end
 end
