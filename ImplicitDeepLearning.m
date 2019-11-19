@@ -185,5 +185,9 @@ classdef ImplicitDeepLearning
             s.f = rand(s.h, 1) - 0.5;
         end
         
+        % visualization
+        function visualize_algo(s)
+            s.utils.visualize_algo(s.additional_info.fval_X, s.additional_info.diff_X)
+        end
     end
 end

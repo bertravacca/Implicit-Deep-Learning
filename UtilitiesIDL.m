@@ -85,6 +85,22 @@ classdef UtilitiesIDL
     end
     
     methods(Static)
+        function []=visualize_algo(fval_X, diff_X)
+            close all;
+            subplot(2,1,1)
+            semilogx(fval_X, 'b', 'LineWidth',0.5)
+            hold on 
+            semilogx(nanmean(fval_X,2), 'r', 'LineWidth',2)
+            title('Convergence of the X-hidden var for each BCD update')
+            xlabel('Inner BCD iterations')
+            ylabel('Implicit Fenchel Objective')
+            subplot(2,1,2)
+            plot(diff_X)
+            title('Norm of update difference for X-hidden var across BCD updates')
+            xticks(1:1:length(diff_X))
+            xlabel('BCD iterations')
+            ylabel('||X^{k+1}-X^{k}||_F')
+        end
         % just compute RMSE
         function out=RMSE(Y_1, Y_2)
             [~,m]=size(Y_1);
