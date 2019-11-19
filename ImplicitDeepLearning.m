@@ -1,6 +1,6 @@
 classdef ImplicitDeepLearning
     properties
-        precision = 10^-5;             % precision used in the solver
+        precision = 10^-6;             % precision used in the solver
         lambda = 0                       % dual variable for fenchel  
         well_posedness = 'infty'    % well_posedness specification
         fval_reg
@@ -37,7 +37,7 @@ classdef ImplicitDeepLearning
             s.utils = UtilitiesIDL;
             %TODO: include checks of inputs
             if s.harpagon == 1
-                s.additional_info = struc('fval_X',[],'diff_X');
+                s.additional_info = struc('fval_X',[],'diff_X', [], 'fval_hidden_param', [], 'diff_hidden_param', []);
             end
         end
          
@@ -53,6 +53,7 @@ classdef ImplicitDeepLearning
             %% Initial training
             % initial implicit problem (lambda=0) start with (A,B,c,X)...
             num_iter_X = 500;
+            num_iter_hidden_param=500;
             if s.harpagon ==1
                 s.additional_info.fval_X = NaN*zeros(num_iter_X+1, num_iter_bcd);
                 s.additional_info.diff_X = NaN*zeros(num_iter_bcd,1);
@@ -61,10 +62,9 @@ classdef ImplicitDeepLearning
                     s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
                     s = s.block_update_regParameters;
                     [s, s.additional_info.fval_X(:,iter_bcd), s.additional_info.diff_X(iter_bcd)] = s.block_update_X(num_iter_X);
-                    s = s.block_update_HiddenParameters(500);
+                    [s, s.additional_info.fval_hidden_param, s.additional_info.diff_hidden_param] = s.block_update_HiddenParameters( num_iter_hidden_param);
                     s.fval_reg(iter_bcd) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
                     s.rmse(iter_bcd) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
-                    s.fval_fenchel_divergence(iter_bcd) = s.utils.scalar_fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1,s.m));
                 end
             end
         end
@@ -92,25 +92,41 @@ classdef ImplicitDeepLearning
         
         function  [s, fvals, diff] = block_update_X(s,num_iter)
             fvals = NaN*zeros(num_iter+1,1);
-            fvals(1) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
+            fvals(1) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda); fval_prev=fvals(1)+1;
             X_prev = s.X;
-            for inner_iter = 1:num_iter
+            iter=1;
+            while iter <= num_iter  && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision 
+                fval_prev = fvals(iter);
                 grad_X = s.gradient_hidden_var;
                 step_X = s.step_size_X;
                 s.X = max(0, s.X - step_X*grad_X);
-                fvals(inner_iter+1) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
+                iter = iter+1;
+                fvals(iter) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
             end
-            diff = norm(s.X - X_prev, 'fro');
+            diff = (1/s.m)*norm(s.X - X_prev, 'fro');
         end
         
-        function s=block_update_HiddenParameters(s,num_iter)
-            for k = 1:num_iter
+        function [s, fvals, diff] = block_update_HiddenParameters(s,num_iter)
+            if norm(s.lambda) == 0
+                lam = ones(s.h, 1);
+            else
+                lam = s.lambda;
+            end
+            fvals = NaN*zeros(num_iter+1,1);
+            fvals(1) = s.utils.scalar_fenchel_divergence(s.X, max(0, s.D* s.X + s.E*s.U_train + s.f*ones(1, s.m)) , lam); fval_prev=fvals(1)+1;
+            D_prev = s.D; E_prev = s.E; f_prev = s.f;
+            iter=1;
+            while iter <= num_iter && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision 
+                fval_prev = fvals(iter);
                 [grad_D, grad_E, grad_f] = s.gradient_parameters_hid;
                 step_theta_hid = 2*s.step_size_parameters_hid;
                 s.D = s.well_posedness_projection(s.D-step_theta_hid*grad_D);
                 s.E = s.E - step_theta_hid*grad_E;
                 s.f = s.f - step_theta_hid*grad_f;
+                iter = iter+1;
+                fvals(iter) = s.utils.scalar_fenchel_divergence(s.X, max(0, s.D* s.X + s.E*s.U_train + s.f*ones(1, s.m)), lam);
             end
+            diff = sqrt(norm(s.D - D_prev, 'fro')^2 + norm(s.E - E_prev, 'fro')^2 + norm(s.f - f_prev)^2);
         end
         
         % gradients

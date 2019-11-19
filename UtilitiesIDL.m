@@ -82,6 +82,11 @@ classdef UtilitiesIDL
             fval = s.MSE_implicit_objective(X, A, B, c, U, Y)+(lambda.*ones(h,1))'* s.fenchel_divergence(X, D*X+E*U+f*ones(1,m));
         end
         
+                
+        function fval=scalar_fenchel_divergence(s,U, V, lambda)
+            fval=s.fenchel_divergence(U, V)'*lambda;
+        end
+        
     end
     
     methods(Static)
@@ -99,7 +104,7 @@ classdef UtilitiesIDL
             title('Norm of update difference for X-hidden var across BCD updates')
             xticks(1:1:length(diff_X))
             xlabel('BCD iterations')
-            ylabel('||X^{k+1}-X^{k}||_F')
+            ylabel('1/m ||X^{k+1}-X^{k}||_F')
         end
         % just compute RMSE
         function out=RMSE(Y_1, Y_2)
@@ -111,11 +116,6 @@ classdef UtilitiesIDL
         function fval=MSE_implicit_objective(X, A, B, c, U, Y)
             [~,m]=size(U);
             fval=(1/m)*norm(A*X+B*U+c*ones(1,m)-Y,'fro')^2;
-        end
-        
-        function fval=scalar_fenchel_divergence(U, V)
-            [~,m]=size(U);
-            fval=(1/m)*(0.5*norm(U,'fro')^2+0.5*norm(max(0,V),'fro')^2-trace(U'*V));
         end
         
         function fval = fenchel_divergence(U, V)
