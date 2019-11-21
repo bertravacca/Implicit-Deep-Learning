@@ -178,7 +178,7 @@ classdef UtilitiesIDL
             % there for this variable?
             numCategories=numel(unique(T.(genvarname(tableVariable))));
             
-            fprintf('There are %i unique values in the tableVariable. \n', numCategories);
+            %fprintf('There are %i unique values in the tableVariable. \n', numCategories);
             
             % start creating one hot encoding variables if the number of categories after
             % variable expansion is reasonable
