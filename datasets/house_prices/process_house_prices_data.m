@@ -2,7 +2,7 @@ function [output_train, output_factor, input_train, input_test, feature_names] =
 data_train = readcell([pwd, '/datasets/house_prices/train.csv']);
 data_test = readcell([pwd, '/datasets/house_prices/test.csv']);
 data =[data_train(:, 2:size(data_train,2)-1); data_test(2:size(data_test,1), 2:size(data_test,2))];
-output_factor = 10^5;
+output_factor = 1;
 output_train = cell2mat(data_train(2:size(data_train,1), size(data_train,2)))'/output_factor;
 num_train = size(data_train, 1)-1;
 num_test = size(data_test, 1)-1;
@@ -67,10 +67,13 @@ for k = 1:length(type_col)
 end
 
 % put all the numeric input between -1 and 1
-for col = 1:size(data_numeric,2)
-    min_val = min(data_numeric(:, col));
-    max_val = max(data_numeric(:, col));
-    data_numeric(:, col) = 2*(data_numeric(:, col) - min_val)/(max_val-min_val)-1;
+normalize=true;
+if normalize==true
+    for col = 1:size(data_numeric,2)
+        min_val = min(data_numeric(:, col));
+        max_val = max(data_numeric(:, col));
+        data_numeric(:, col) = 2*(data_numeric(:, col) - min_val)/(max_val-min_val)-1;
+    end
 end
 % one hot encoding of categorical variables
 data_categorical = cell2table(data_categorical);
