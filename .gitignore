@@ -5,3 +5,5 @@ RandOrthMat.m
 explore_implicit_prediction_rule.mlx
 test_implicit_deep_learning.m
 submission.csv
+/datasets/submission.csv
+/datasets/DS_Store
