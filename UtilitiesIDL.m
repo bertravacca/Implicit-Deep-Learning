@@ -220,16 +220,25 @@ classdef UtilitiesIDL
     end
     
     methods(Static)
-        function []=visualize_algo(fval_X, diff_X)
+        function []=visualize_algo(fval_X, fval_hidden_param, diff_X)
             close all;
-            subplot(2,1,1)
+            subplot(3,1,1)
             semilogx(fval_X, 'b', 'LineWidth',0.5)
             hold on 
             semilogx(nanmean(fval_X,2), 'r', 'LineWidth',2)
             title('Convergence of the X-hidden var for each BCD update')
             xlabel('Inner BCD iterations')
             ylabel('Implicit Fenchel Objective')
-            subplot(2,1,2)
+            
+            subplot(3,1,2)
+            semilogx(fval_hidden_param, 'b', 'LineWidth',0.5 )
+            hold on
+            semilogx(nanmean(fval_hidden_param,2), 'r', 'LineWidth',2)
+            title('Convergence of the hidden parameters for each BCD update')
+            xlabel('Inner BCD iterations')
+            ylabel('Fenchel divergence')
+            
+            subplot(3,1,3)
             plot(diff_X)
             title('Norm of update difference for X-hidden var across BCD updates')
             xticks(1:1:length(diff_X))
@@ -288,10 +297,16 @@ classdef UtilitiesIDL
         end
         
         function fval = fenchel_divergence(U, V)
-            [~,m]=size(U);
-            fval=(1/m)*(0.5*sum(U,2).^2+0.5*sum(max(0,V),2).^2-sum(U.*V,2));
+            m = size(U, 2);
+            fval = (1/m)*(0.5*sum(U.^2,2)+0.5*sum(max(0,V).^2,2)-sum(U.*V,2));
         end
         
+        function val = L2_implicit_constraint(U,V)
+            m = size(U,2);
+            val = (1/sqrt(m))*norm(U-max(0,V),'fro');
+        end
+        
+        % one hot encoding for categorical datasets
         function T=createOneHotEncoding(T,tableVariable)
             %
             % Code written by Christopher L. Stokely, January 30, 2019
