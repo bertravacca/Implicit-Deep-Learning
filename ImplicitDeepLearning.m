@@ -54,7 +54,7 @@ classdef ImplicitDeepLearning
             %% Initial training
             % initial implicit problem (lambda=0) start with (A,B,c,X)...
             num_iter_X = 500;
-            num_iter_hidden_param=10^4;
+            num_iter_hidden_param=10^3;
             s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
             if s.harpagon ==1
                 s.additional_info.fval_X = NaN*zeros(num_iter_X+1, num_iter_bcd);
@@ -63,7 +63,7 @@ classdef ImplicitDeepLearning
                     % updates
                     s = s.block_update_regParameters;
                     [s, s.additional_info.fval_X(:,iter_bcd), s.additional_info.diff_X(iter_bcd)] = s.block_update_X(num_iter_X);
-                    [s, s.additional_info.fval_hidden_param(:, iter_bcd), s.additional_info.diff_hidden_param(iter_bcd)] = s.block_update_HiddenParameters( num_iter_hidden_param);
+                    [s, s.additional_info.fval_hidden_param(:, iter_bcd), s.additional_info.diff_hidden_param(iter_bcd)] = s.block_update_HiddenParameters( num_iter_hidden_param, 'armijo_gradient');
                     s.fval_reg(iter_bcd) = s.utils.MSE_implicit_objective(s.X, s.A, s.B, s.c, s.U_train, s.Y_train);
                     s.rmse(iter_bcd) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
                 end
@@ -112,27 +112,58 @@ classdef ImplicitDeepLearning
         end
         
         % Block update 
-        function [s, fvals, diff] = block_update_HiddenParameters(s,num_iter)
+        function [s, fvals, diff] = block_update_HiddenParameters(s,num_iter, method)
             if norm(s.lambda) == 0
                 lam = ones(s.h, 1);
             else
                 lam = s.lambda;
             end
+
             fvals = NaN*zeros(num_iter+1,1);
             fvals(1) = s.utils.scalar_fenchel_divergence(s.X,  s.D* s.X + s.E*s.U_train + s.f*ones(1, s.m) , lam); fval_prev=fvals(1)+1;
             D_prev = s.D; E_prev = s.E; f_prev = s.f;
             iter=1;
-            while iter <= num_iter && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision 
-                fval_prev = fvals(iter);
-                [grad_D, grad_E, grad_f] =  s.gradient_parameters_hid;
-                step_theta_hid = s.step_size_parameters_hid;
-                s.D = s.well_posedness_projection(s.D - step_theta_hid*grad_D);
-                s.E = s.E - step_theta_hid*grad_E;
-                s.f = s.f - step_theta_hid*grad_f;
-                iter = iter+1;
-                fvals(iter) = s.utils.scalar_fenchel_divergence(s.X, s.D* s.X + s.E*s.U_train + s.f*ones(1, s.m), lam);
+            if strcmp(method, 'classic_gradient')
+                while iter <= num_iter && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision
+                    fval_prev = fvals(iter);
+                    [grad_D, grad_E, grad_f] =  s.gradient_parameters_hid;
+                    step_theta_hid = s.step_size_parameters_hid;
+                    s.D = s.well_posedness_projection(s.D - step_theta_hid*grad_D);
+                    s.E = s.E - step_theta_hid*grad_E;
+                    s.f = s.f - step_theta_hid*grad_f;
+                    iter = iter+1;
+                    fvals(iter) = s.utils.scalar_fenchel_divergence(s.X, s.D* s.X + s.E*s.U_train + s.f*ones(1, s.m), lam);
+                end
+                
+            elseif strcmp(method, 'armijo_gradient')
+                % initialize the step size
+                step = 100*s.step_size_parameters_hid;
+                c_armijo = 10^-4;
+                step_divide = 2;
+                while iter <= num_iter && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision
+                    fval_prev = fvals(iter);
+                    armijo_condition = false;
+                    [grad_D, grad_E, grad_f] =  s.gradient_parameters_hid;
+                    norm_gradient_square = norm(grad_D, 'fro')^2 + norm(grad_E, 'fro')^2 + norm(grad_f)^2;
+                    step_new = step;
+                    while armijo_condition == false
+                        D_new = s.well_posedness_projection(s.D - step_new*grad_D);
+                        E_new = s.E - step_new*grad_E;
+                        f_new = s.f - step_new*grad_f;
+                        fval_new = s.utils.scalar_fenchel_divergence(s.X, D_new* s.X + E_new*s.U_train + f_new*ones(1, s.m), lam);
+                        armijo_condition = (fval_new < fval_prev - c_armijo * step_new * norm_gradient_square) ;
+                        step_new = step_new/step_divide; 
+                    end
+                    step = step_new * step_divide^2;
+                    s.D = D_new; 
+                    s.E = E_new;
+                    s.f = f_new;
+                    iter = iter+1;
+                    fvals(iter) = fval_new;
+                end
             end
-            diff = sqrt(norm(s.D - D_prev, 'fro')^2 + norm(s.E - E_prev, 'fro')^2 + norm(s.f - f_prev)^2);
+            
+                diff = sqrt(norm(s.D - D_prev, 'fro')^2 + norm(s.E - E_prev, 'fro')^2 + norm(s.f - f_prev)^2);
         end
         
         %% Gradient computation
