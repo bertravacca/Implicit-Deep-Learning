@@ -8,6 +8,7 @@ classdef UtilitiesIDL
         function s=UtilitiesIDL
         end
         
+        % projections
         function D=infty_norm_projection(s,D,radius)
             [h,~]=size(D);
             for j=1:h
@@ -33,6 +34,7 @@ classdef UtilitiesIDL
             end
         end
         
+        % compute implicit X
         function X=picard_iterations(s,U,D,E,f)
             [h,~]=size(D);
             [~,m]=size(U);
@@ -47,6 +49,7 @@ classdef UtilitiesIDL
             end
         end
         
+        % generate random orthogonal matrix
         function M=RandOrthMat(s,n)
             % (c) Ofek Shilon , 2006.
             tol=s.precision;
@@ -71,12 +74,13 @@ classdef UtilitiesIDL
             end
         end
         
-        % compute the MSE given model parameters
+        % compute the RMSE given model parameters
         function out=RMSE_actual_implicit(s,A,B,c,D,E,f,U,Y)
             X=s.picard_iterations(U,D,E,f);
             out=sqrt(s.MSE_implicit_objective(X,A,B,c,U,Y));
         end
-            
+        
+        % full objective for implicit deep learning
         function fval = implicit_objective(s,X, A, B, c, D, E, f, U, Y, lambda)
              [h,m]=size(X);
             fval = s.MSE_implicit_objective(X, A, B, c, U, Y)+(lambda.*ones(h,1))'* s.fenchel_divergence(X, D*X+E*U+f*ones(1,m));
@@ -86,6 +90,7 @@ classdef UtilitiesIDL
             fval=s.fenchel_divergence(U, V)'*lambda;
         end
         
+        % vector projection on the L1 ball
         function [sol,info] = proj_b1(s, x, ~, param)
             %PROJ_B1 Projection onto a L1-ball
             %   Usage:  sol=proj_b1(x, ~, param)
@@ -220,9 +225,9 @@ classdef UtilitiesIDL
     end
     
     methods(Static)
-        function []=visualize_algo_init(fval_X, fval_hidden_param)
-            close all;
-            subplot(3,1,1)
+        function [] = visualize_algo_init(fval_X, fval_hidden_param)
+            figure()
+            subplot(2,1,1)
             semilogx(fval_X, 'b', 'LineWidth',0.5)
             hold on 
             semilogx(nanmean(fval_X,2), 'r', 'LineWidth',2)
@@ -230,17 +235,29 @@ classdef UtilitiesIDL
             xlabel('Inner BCD iterations')
             ylabel('Implicit Fenchel Objective')
             
-            subplot(3,1,2)
+            subplot(2,1,2)
             semilogx(fval_hidden_param, 'b', 'LineWidth',0.5 )
             hold on
             semilogx(nanmean(fval_hidden_param,2), 'r', 'LineWidth',2)
             title('Convergence of the hidden parameters for each BCD update')
             xlabel('Inner BCD iterations')
             ylabel('Fenchel divergence')
-
+        end
+        
+        function [] = visualize_algo(fval, rmse)
+            figure()
+            subplot(2,1,1)
+            plot(fval, 'b', 'LineWidth',0.5)
+            xlabel('iterations')
+            title('Evolution of implicit objective across iterations')
+            
+            subplot(2,1,2)
+            plot(rmse, 'r', 'LineWidth',0.5)
+            title('Evolution of RMSE across iterations')
+            xlabel('iterations')
+            legend('objective implicit', 'RMSE')
         end
 
-        
         function [sol,iter] = one_projector(x,weight,tau)
             % This code is partly borrowed from the SPGL toolbox
             % Initialization

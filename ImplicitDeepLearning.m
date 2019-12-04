@@ -1,9 +1,10 @@
 classdef ImplicitDeepLearning
     properties
         precision = 10^-6;             % precision used in the solver
-        lower_precision = 10^-4;   % lower precision parameter used
+        lower_precision = 10^-5;   % lower precision parameter used
         lambda = 0                       % dual variable for fenchel  
         well_posedness = 'infty'    % well_posedness specification
+        fval
         fval_reg
         fval_fenchel_divergence
         rmse
@@ -27,7 +28,7 @@ classdef ImplicitDeepLearning
         additional_info
         harpagon = 1
         verbose = 1
-        radius = 0.5
+        radius = 0.1
     end
     
     methods
@@ -45,7 +46,45 @@ classdef ImplicitDeepLearning
         end
         
         %% Implicit training
-        function s=train(s)
+        function s = train(s)
+            s = s.initial_train; 
+            dual_step = 1;
+            s.lambda = s.dual_variable_update(s.lambda, dual_step);
+
+            if norm(s.lambda)>0
+                max_iter = 5*10^3;
+                dual_update_period = 100;
+                s.fval = NaN*ones(max_iter, 1);
+                s.rmse = NaN*ones(max_iter,1);
+                for iter =1:max_iter
+                    % block X
+                    grad_X = s.gradient_hidden_var;
+                    step_X = s.step_size_X;
+                    s.X = max(0, s.X-step_X * grad_X);
+                    % block reg
+                    [grad_A, grad_B, grad_c] = s.gradient_parameters_reg;
+                    step_reg = s.step_size_parameters_reg;
+                    s.A = s.A - step_reg * grad_A;
+                    s.B = s.B - step_reg * grad_B; 
+                    s.c = s.c - step_reg * grad_c; 
+                    % block hidden
+                    [grad_D, grad_E, grad_f] =  s.gradient_parameters_hid;
+                    step_hid = s.step_size_parameters_hid;
+                    s.D = s.well_posedness_projection(s.D - step_hid*grad_D, s.radius);
+                    s.E = s.E - step_hid*grad_E;
+                    s.f = s.f - step_hid*grad_f;
+                    % compute fvals and rmse
+                    s.fval(iter) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
+                    s.rmse(iter) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
+                    % dual variable update 
+                    if mod(iter,dual_update_period) == 0
+                        s.lambda = s.dual_variable_update(s.lambda, dual_step);
+                    end
+                    if s.verbose == 1 && mod(iter, ceil( max_iter / 20 )) == 0
+                        disp(['The RMSE at iteration ', num2str(iter), ' is: ',num2str(s.rmse(iter))])
+                    end
+                end
+            end
 
         end
         %% Initial training
@@ -59,6 +98,12 @@ classdef ImplicitDeepLearning
             num_iter_X = 500;
             num_iter_hidden_param=10^4;
             s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
+            
+            % initial rmse
+            if s.verbose == 1
+                val = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
+                disp(['Initialization started, the initial RMSE is: ', num2str(val)])
+            end
             if s.harpagon ==1
                 s.additional_info.fval_X = NaN*zeros(num_iter_X+1, num_max_iter_bcd);
                 s.additional_info.diff_X = NaN*zeros(num_max_iter_bcd,1);
@@ -77,10 +122,18 @@ classdef ImplicitDeepLearning
             
             if s.verbose == 1
                 disp(['The number of bcd iterations used for intitialization was: ', num2str(iter_bcd-1)])
+                val = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
+                disp(['Initialization finished, the RMSE is: ', num2str(val)])
             end
         end
         
         %% Algorithms
+        % dual update
+        function lambda = dual_variable_update(s, lambda, dual_step)
+            F_star = s.utils.fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1, s.m));
+            v = 1*(F_star>s.lower_precision);
+            lambda = lambda + dual_step * v;
+        end
         
         % Block update for X
         function  [s, fvals, diff] = block_update_X(s,num_iter)
@@ -230,6 +283,7 @@ classdef ImplicitDeepLearning
             end
         end
    
+        %% well posed projection
         function D = well_posedness_projection(s,D, radius)
             if strcmp(s.well_posedness, 'infty')
                 D = s.utils.infty_norm_projection(D, radius);
@@ -238,6 +292,7 @@ classdef ImplicitDeepLearning
             end
         end
         
+        %% parameter initialization
         function s = parameter_initialization(s)
             s.A = rand(s.p, s.h) - 0.5;
             s.B  =rand(s.p, s.n) - 0.5;
@@ -250,6 +305,10 @@ classdef ImplicitDeepLearning
         %% Visualization
         function visualize_algo_init(s)
             s.utils.visualize_algo_init(s.additional_info.fval_X, s.additional_info.fval_hidden_param)
+        end
+        
+        function visualize_algo(s)
+            s.utils.visualize_algo(s.fval, s.rmse);
         end
     end
 end
