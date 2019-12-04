@@ -8,10 +8,10 @@ classdef UtilitiesIDL
         function s=UtilitiesIDL
         end
         
-        function D=infty_norm_projection(s,D)
+        function D=infty_norm_projection(s,D,radius)
             [h,~]=size(D);
             for j=1:h
-                D(j,:)=(1-s.wp_precision)*s.proj_b1(1/(1-s.wp_precision)*D(j,:));
+                D(j,:)=(1-radius)*s.proj_b1(1/(1-radius)*D(j,:));
             end
         end
         
@@ -220,7 +220,7 @@ classdef UtilitiesIDL
     end
     
     methods(Static)
-        function []=visualize_algo(fval_X, fval_hidden_param, diff_X)
+        function []=visualize_algo_init(fval_X, fval_hidden_param)
             close all;
             subplot(3,1,1)
             semilogx(fval_X, 'b', 'LineWidth',0.5)
@@ -237,13 +237,7 @@ classdef UtilitiesIDL
             title('Convergence of the hidden parameters for each BCD update')
             xlabel('Inner BCD iterations')
             ylabel('Fenchel divergence')
-            
-            subplot(3,1,3)
-            plot(diff_X)
-            title('Norm of update difference for X-hidden var across BCD updates')
-            xticks(1:1:length(diff_X))
-            xlabel('BCD iterations')
-            ylabel('1/m ||X^{k+1}-X^{k}||_F')
+
         end
 
         
