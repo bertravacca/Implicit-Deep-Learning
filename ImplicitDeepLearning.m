@@ -1,5 +1,6 @@
 classdef ImplicitDeepLearning
     properties
+        activation = 'ReLU'
         precision = 10^-6;             % precision used in the solver
         lower_precision = 10^-5;   % lower precision parameter used
         lambda = 0                       % dual variable for fenchel
@@ -53,16 +54,17 @@ classdef ImplicitDeepLearning
         
         %% Implicit training
         function s = train(s)
-            if s.initial_learning == 1
-                s = s.initial_train;
-            else
-                s=s.parameter_initialization;
-                s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
-                s.lambda = 10^-3;
-            end
-            s.lambda = s.dual_variable_update(s.lambda, s.dual_step);
-            
-            if norm(s.lambda)>0
+            if strcmp(s.activation, 'ReLu')
+                if s.initial_learning == 1
+                    s = s.initial_train;
+                else
+                    s=s.parameter_initialization;
+                    s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
+                    s.lambda = 10^-3;
+                end
+                s.lambda = s.dual_variable_update(s.lambda, s.dual_step);
+                
+                
                 dual_update_period = 10;
                 s.fval = NaN*ones(s.max_iter, 1);
                 s.rmse = NaN*ones(s.max_iter,1);
@@ -85,7 +87,8 @@ classdef ImplicitDeepLearning
                     s.f = s.f - step_hid*grad_f;
                     % compute fvals and rmse
                     s.fval(iter) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
-                    s.rmse(iter) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
+                    s.fval_reg(iter) = s.utils.RMSE(s.Y_train, s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m));
+                    s.rmse(iter) = 0.5*s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train)^2;
                     % dual variable update
                     if mod(iter,dual_update_period) == 0
                         s.lambda = s.dual_variable_update(s.lambda, s.dual_step);
@@ -93,8 +96,10 @@ classdef ImplicitDeepLearning
                     if s.verbose == 1 && mod(iter, ceil( s.max_iter / 100 )) == 0
                         disp(['The RMSE at iteration ', num2str(iter), ' is: ',num2str(s.rmse(iter))])
                     end
-                    
                 end
+            elseif strcmp(s.activation, 'leakyReLu')
+                s=s.parameter_initialization;
+                s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
                 
             end
         end
@@ -330,7 +335,7 @@ classdef ImplicitDeepLearning
         end
         
         function visualize_algo(s)
-            s.utils.visualize_algo(s.fval, s.rmse);
+            s.utils.visualize_algo(s.fval, s.fval_reg, s.rmse);
         end
     end
 end 

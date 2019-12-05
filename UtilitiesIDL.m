@@ -244,10 +244,12 @@ classdef UtilitiesIDL
             ylabel('Fenchel divergence')
         end
         
-        function [] = visualize_algo(fval, rmse)
+        function [] = visualize_algo(fval, fval_reg, rmse)
             figure()
             subplot(2,1,1)
             semilogx(fval, 'b', 'LineWidth',0.5)
+            hold on 
+             semilogx(fval_reg, 'r', 'LineWidth',0.5)
             xlabel('iterations')
             title('Evolution of implicit objective across iterations')
             
