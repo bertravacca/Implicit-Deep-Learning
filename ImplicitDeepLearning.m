@@ -2,7 +2,7 @@ classdef ImplicitDeepLearning
     properties
         precision = 10^-6;             % precision used in the solver
         lower_precision = 10^-5;   % lower precision parameter used
-        lambda = 0                       % dual variable for fenchel  
+        lambda = 0                       % dual variable for fenchel
         well_posedness = 'infty'    % well_posedness specification
         fval
         fval_reg
@@ -11,11 +11,11 @@ classdef ImplicitDeepLearning
         utils
         %  The following matrices and vectors correspond to the implicit
         %   prediction rule:
-        %                 y = Ax+Bu+c; x = max(0,Dx+Eu+f)      
+        %                 y = Ax+Bu+c; x = max(0,Dx+Eu+f)
         U_train         % input matrix (training)
         Y_train         % output matrix
         X                  % hidden features matrix
-        A 
+        A
         B
         c
         D
@@ -28,17 +28,23 @@ classdef ImplicitDeepLearning
         additional_info
         harpagon = 1
         verbose = 1
-        radius = 0.1
+        radius = 0.5
+        initial_learning = 0;
+        max_iter = 100;
+        dual_step = 1;
     end
     
     methods
-        function s = ImplicitDeepLearning(U, Y, h)
+        function s = ImplicitDeepLearning(U, Y, h, max_iter, dual_step, radius)
             s.U_train = U;
             s.Y_train = Y;
             s.h = h;
             [s.n,s.m] = size(U);
             [s.p,~] = size(Y);
             s.utils = UtilitiesIDL;
+            s.radius = radius;
+            s.max_iter = max_iter;
+            s.dual_step = dual_step;
             %TODO: include checks of inputs
             if s.harpagon == 1
                 s.additional_info = struc('fval_X',[],'diff_X', [], 'fval_hidden_param', [], 'diff_hidden_param', []);
@@ -47,16 +53,20 @@ classdef ImplicitDeepLearning
         
         %% Implicit training
         function s = train(s)
-            s = s.initial_train; 
-            dual_step = 1;
-            s.lambda = s.dual_variable_update(s.lambda, dual_step);
-
+            if s.initial_learning == 1
+                s = s.initial_train;
+            else
+                s=s.parameter_initialization;
+                s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f);
+                s.lambda = 10^-3;
+            end
+            s.lambda = s.dual_variable_update(s.lambda, s.dual_step);
+            
             if norm(s.lambda)>0
-                max_iter = 5*10^3;
-                dual_update_period = 100;
-                s.fval = NaN*ones(max_iter, 1);
-                s.rmse = NaN*ones(max_iter,1);
-                for iter =1:max_iter
+                dual_update_period = 10;
+                s.fval = NaN*ones(s.max_iter, 1);
+                s.rmse = NaN*ones(s.max_iter,1);
+                for iter =1:s.max_iter
                     % block X
                     grad_X = s.gradient_hidden_var;
                     step_X = s.step_size_X;
@@ -65,8 +75,8 @@ classdef ImplicitDeepLearning
                     [grad_A, grad_B, grad_c] = s.gradient_parameters_reg;
                     step_reg = s.step_size_parameters_reg;
                     s.A = s.A - step_reg * grad_A;
-                    s.B = s.B - step_reg * grad_B; 
-                    s.c = s.c - step_reg * grad_c; 
+                    s.B = s.B - step_reg * grad_B;
+                    s.c = s.c - step_reg * grad_c;
                     % block hidden
                     [grad_D, grad_E, grad_f] =  s.gradient_parameters_hid;
                     step_hid = s.step_size_parameters_hid;
@@ -76,17 +86,20 @@ classdef ImplicitDeepLearning
                     % compute fvals and rmse
                     s.fval(iter) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
                     s.rmse(iter) = s.utils.RMSE_actual_implicit(s.A,s.B,s.c,s.D,s.E,s.f,s.U_train,s.Y_train);
-                    % dual variable update 
+                    % dual variable update
                     if mod(iter,dual_update_period) == 0
-                        s.lambda = s.dual_variable_update(s.lambda, dual_step);
+                        s.lambda = s.dual_variable_update(s.lambda, s.dual_step);
                     end
-                    if s.verbose == 1 && mod(iter, ceil( max_iter / 20 )) == 0
+                    if s.verbose == 1 && mod(iter, ceil( s.max_iter / 100 )) == 0
                         disp(['The RMSE at iteration ', num2str(iter), ' is: ',num2str(s.rmse(iter))])
                     end
+                    
                 end
+                
             end
-
         end
+
+ 
         %% Initial training
         function s = initial_train(s)
             s = s.parameter_initialization;
@@ -128,14 +141,8 @@ classdef ImplicitDeepLearning
         end
         
         %% Algorithms
-        % dual update
-        function lambda = dual_variable_update(s, lambda, dual_step)
-            F_star = s.utils.fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1, s.m));
-            v = 1*(F_star>s.lower_precision);
-            lambda = lambda + dual_step * v;
-        end
         
-        % Block update for X
+        % Full block update for X
         function  [s, fvals, diff] = block_update_X(s,num_iter)
             fvals = NaN*zeros(num_iter+1,1);
             fvals(1) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda); fval_prev=fvals(1)+1;
@@ -152,7 +159,7 @@ classdef ImplicitDeepLearning
             diff = (1/s.m)*norm(s.X - X_prev, 'fro');
         end
         
-        % Block update for X considering loss only (i.e. not considering implicit constraint)
+        % Full block update for X considering loss only (i.e. not considering implicit constraint)
         function s = block_update_X_regParameters(s,num_iter)
             for k = 1:num_iter
                 [grad_A, grad_B, grad_c] = s.gradient_parameters_reg;
@@ -166,7 +173,7 @@ classdef ImplicitDeepLearning
             end
         end
         
-        % Block update for the regression parameters
+        % Full block update for the regression parameters
         function [s, info] = block_update_regParameters(s)
             Z=[s.X;s.U_train;ones(1,s.m)];
             Theta=s.Y_train*Z'/(Z*Z'+s.precision*eye(s.h+s.n+1));
@@ -174,7 +181,7 @@ classdef ImplicitDeepLearning
             info = s.utils.MSE_implicit_objective(s.X,s.A,s.B,s.c,s.U_train,s.Y_train);
         end
         
-        % Block update for hidden parameters
+        % Full block update for hidden parameters
         function [s, fvals, diff] = block_update_HiddenParameters(s,num_iter, method)
             if norm(s.lambda) == 0
                 lam = ones(s.h, 1);
@@ -227,6 +234,14 @@ classdef ImplicitDeepLearning
             end
             
                 diff = sqrt(norm(s.D - D_prev, 'fro')^2 + norm(s.E - E_prev, 'fro')^2 + norm(s.f - f_prev)^2);
+        end
+        
+        %% Gradient steps
+        % dual update
+        function lambda = dual_variable_update(s, lambda, dual_step)
+            F_star = s.utils.fenchel_divergence(s.X, s.D*s.X + s.E*s.U_train + s.f*ones(1, s.m));
+            v = 1*(F_star>s.lower_precision);
+            lambda = lambda + dual_step * v;
         end
         
         %% Gradient computation
@@ -302,6 +317,13 @@ classdef ImplicitDeepLearning
             s.f = rand(s.h, 1) - 0.5;
         end
         
+        %% Implicit prediction rule
+        function Y_prediction = implicit_prediction(s, U)
+            m_pred = size(U,2);
+            X_pred = s.utils.picard_iterations(U, s.D, s.E, s.f);
+            Y_prediction = s.A * X_pred +s.B * U + s.c * ones(1,m_pred);
+        end
+        
         %% Visualization
         function visualize_algo_init(s)
             s.utils.visualize_algo_init(s.additional_info.fval_X, s.additional_info.fval_hidden_param)
@@ -311,4 +333,5 @@ classdef ImplicitDeepLearning
             s.utils.visualize_algo(s.fval, s.rmse);
         end
     end
-end
+end 
+

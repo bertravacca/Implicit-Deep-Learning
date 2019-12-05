@@ -247,12 +247,35 @@ classdef UtilitiesIDL
         function [] = visualize_algo(fval, rmse)
             figure()
             subplot(2,1,1)
-            plot(fval, 'b', 'LineWidth',0.5)
+            semilogx(fval, 'b', 'LineWidth',0.5)
             xlabel('iterations')
             title('Evolution of implicit objective across iterations')
             
             subplot(2,1,2)
-            plot(rmse, 'r', 'LineWidth',0.5)
+            semilogx(rmse, 'r', 'LineWidth',0.5)
+            title('Evolution of RMSE across iterations')
+            xlabel('iterations')
+
+        end
+        
+                
+        function [] = live_visualize_algo(fval_point, rmse_point, iter)
+            if iter == 1
+                figure()
+            end
+            subplot(2,1,1)
+            plot([fval_point, iter], 'b', 'LineWidth',0.5)
+            if iter == 1
+                hold on
+            end
+            xlabel('iterations')
+            title('Evolution of implicit objective across iterations')
+            
+            subplot(2,1,2)
+            plot([rmse_point, iter], 'r', 'LineWidth',0.5)
+            if iter == 1
+                hold on
+            end
             title('Evolution of RMSE across iterations')
             xlabel('iterations')
             legend('objective implicit', 'RMSE')
