@@ -35,18 +35,26 @@ classdef UtilitiesIDL
         end
         
         % compute implicit X
-        function X=picard_iterations(s,U,D,E,f)
+        function X=picard_iterations(s,U,D,E,f, activation)
             [h,~]=size(D);
             [~,m]=size(U);
             X=rand(h,m)-0.5;
             k=1;
-            while k<10^3 && norm(X-max(0,D*X+E*U+f*ones(1,m)),'fro')>s.precision
-                X=max(0,D*X+E*U+f*ones(1,m));
-                k=k+1;
+            if strcmp(activation, 'ReLU')
+                while k<10^3 && norm(X-max(0,D*X+E*U+f*ones(1,m)),'fro')>s.precision
+                    X=max(0,D*X+E*U+f*ones(1,m));
+                    k=k+1;
+                end
+            elseif strcmp(activation, 'leakyReLU')
+                while k<10^3 && norm(X-s.leakyReLU(D*X+E*U+f*ones(1,m)),'fro')>s.precision
+                    X=s.leakyReLU(D*X+E*U+f*ones(1,m));
+                    k=k+1;
+                end
             end
             if k>=10^3
                 disp('picard iterations were not able to find a solution X to the implicit model within 1,000 iterations')
             end
+
         end
         
         % generate random orthogonal matrix
@@ -75,8 +83,8 @@ classdef UtilitiesIDL
         end
         
         % compute the RMSE given model parameters
-        function out=RMSE_actual_implicit(s,A,B,c,D,E,f,U,Y)
-            X=s.picard_iterations(U,D,E,f);
+        function out=RMSE_actual_implicit(s,A,B,c,D,E,f,U,Y, activation)
+            X=s.picard_iterations(U,D,E,f, activation);
             out=sqrt(s.MSE_implicit_objective(X,A,B,c,U,Y));
         end
         
@@ -259,7 +267,6 @@ classdef UtilitiesIDL
             xlabel('iterations')
 
         end
-        
                 
         function [] = live_visualize_algo(fval_point, rmse_point, iter)
             if iter == 1
@@ -431,6 +438,14 @@ classdef UtilitiesIDL
                 error('There are over 99 categories for this table variable.  Unable to proceed unless user increases conditional on line 42 to a more appropriate level.');
             end
             
+        end
+        
+        function out = leakyReLU(z)
+            out = max(0,z) + 0.5 * min(0,z);
+        end
+        
+        function out = inverse_leakyReLU(z)
+            out = max(0, z) + 2* min(0, z);
         end
 
     end
