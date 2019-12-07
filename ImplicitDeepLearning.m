@@ -102,11 +102,15 @@ classdef ImplicitDeepLearning
             elseif strcmp(s.activation, 'leakyReLU')
                 s=s.parameter_initialization;
                 s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f, s.activation);
+                s.rmse = NaN*ones(s.max_iter,1);
+                s.fval = NaN*ones(s.max_iter, 1);
                 for iter = 1:s.max_iter
-                     s = s.block_update_regParameters;
-                     s = s.block_update_X_regParameters;
-                     s = s.block_update_HiddenParameters(10^3, 'armijo');
-                     s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f, s.activation);
+                    s = s.block_update_regParameters;
+                    s = s.block_update_X_regParameters;
+                    s = s.block_update_HiddenParameters(10^3, 'armijo');
+                    s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f, s.activation);
+                    s.rmse(iter) = 0.5*s.utils.RMSE_actual_implicit(s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.activation)^2;
+                    s.fval(iter) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
                 end
             end
         end
