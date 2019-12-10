@@ -56,7 +56,6 @@ classdef ImplicitDeepLearning
         %% Implicit training
         function s = train(s)
             if strcmp(s.activation, 'ReLU')
-                disp('hello?')
                 if s.initial_learning == 1
                     s = s.initial_train;
                 else
@@ -90,7 +89,7 @@ classdef ImplicitDeepLearning
                     % compute fvals and rmse
                     s.fval(iter) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
                     s.fval_reg(iter) = s.utils.RMSE(s.Y_train, s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m));
-                    s.rmse(iter) = 0.5*s.utils.RMSE_actual_implicit(s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.activation)^2;
+                    s.rmse(iter) = s.utils.RMSE_actual_implicit(s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.activation);
                     % dual variable update
                     if mod(iter,dual_update_period) == 0
                         s.lambda = s.dual_variable_update(s.lambda, s.dual_step);
@@ -102,15 +101,61 @@ classdef ImplicitDeepLearning
             elseif strcmp(s.activation, 'leakyReLU')
                 s=s.parameter_initialization;
                 s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f, s.activation);
-                s.rmse = NaN*ones(s.max_iter,1);
+                s.rmse = NaN*ones(s.max_iter+1,1);
                 s.fval = NaN*ones(s.max_iter, 1);
+                num_iter_hidden = 10^2;
+                s.additional_info.fval_hidden_param = NaN* zeros(num_iter_hidden+1, s.max_iter);
+                s.rmse(1) = s.utils.RMSE_actual_implicit(s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.activation);
+                method = 'blo ck';
                 for iter = 1:s.max_iter
-                    s = s.block_update_regParameters;
-                    s = s.block_update_X_regParameters;
-                    s = s.block_update_HiddenParameters(10^3, 'armijo');
-                    s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f, s.activation);
-                    s.rmse(iter) = 0.5*s.utils.RMSE_actual_implicit(s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.activation)^2;
-                    s.fval(iter) = s.utils.implicit_objective(s.X, s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.lambda);
+                    if strcmp(method, 'block')
+                        figure(iter)
+                        plot(s.U_train, s.Y_train, 'g.')
+                        hold on
+                        plot(s.U_train,s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m), 'b.')
+                        disp('RMSE before reg update')
+                        disp(s.utils.RMSE(s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m), s.Y_train))
+                        
+                        s = s.block_update_regParameters;
+                        
+                        plot(s.U_train,s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m), 'r.')
+                        disp('RMSE after reg update')
+                        disp(s.utils.RMSE(s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m), s.Y_train))
+                        
+                        s.X = s.block_update_X_regParameters;
+                        
+                        plot(s.U_train,s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m), 'c.')
+                        disp('RMSE after X reg update')
+                        disp(s.utils.RMSE(s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m), s.Y_train))
+                        disp('RMSE of the implicit error before hidden updates')
+                        disp(s.utils.L2_implicit_constraint(s.X,s.D*s.X+s.E*s.U_train+s.f*ones(1,s.m),'leakyReLU'))
+                        
+                        [s, s.additional_info.fval_hidden_param(:,iter)] = s.block_update_HiddenParameters(num_iter_hidden, 'leakyReLU');
+                        
+                        disp('RMSE of the implicit error after hidden updates')
+                        disp(s.utils.L2_implicit_constraint(s.X,s.D*s.X+s.E*s.U_train+s.f*ones(1,s.m),'leakyReLU'))
+                        
+                        X_prev= s.X;
+                        s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f, s.activation);
+                        
+                        plot(s.U_train,s.A*s.X+s.B*s.U_train+s.c*ones(1,s.m), 'k.')
+                        disp('Difference with the real implicit solution')
+                        disp(1/sqrt(s.m)*norm(X_prev-s.X,'fro'))
+                        s.rmse(iter+1)  = s.utils.RMSE_actual_implicit(s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.activation);
+                        hold off
+                    else
+                        s = s.block_update_regParameters;
+                        grad_X = s.gradient_hidden_var;
+                        step = s.step_size_X;
+                        s.X = s.X - step * grad_X;
+                        [grad_D, grad_E, grad_f] = s.gradient_parameters_hid;
+                        step_theta_hid = s.step_size_parameters_hid;
+                        s.D = s.well_posedness_projection(s.D - step_theta_hid*grad_D, s.radius);
+                        s.E = s.E - step_theta_hid*grad_E;
+                        s.f = s.f - step_theta_hid*grad_f;
+                        s.X = s.utils.picard_iterations(s.U_train, s.D, s.E, s.f, s.activation);
+                        s.rmse(iter+1)  = s.utils.RMSE_actual_implicit(s.A, s.B, s.c, s.D, s.E, s.f, s.U_train, s.Y_train, s.activation);
+                    end
                 end
             end
         end
@@ -176,20 +221,15 @@ classdef ImplicitDeepLearning
         end
         
         % Full block update for X considering loss only (i.e. not considering implicit constraint)
-        function s = block_update_X_regParameters(s,num_iter)
+        function X = block_update_X_regParameters(s,num_iter)
             if strcmp(s.activation, 'ReLU')
                 for k = 1:num_iter
-                    [grad_A, grad_B, grad_c] = s.gradient_parameters_reg;
                     grad_X = s.gradient_hidden_var;
-                    step_theta_reg = s.step_size_parameters_reg;
                     step_X = s.step_size_X;
-                    s.A = s.A-step_theta_reg*grad_A;
-                    s.B = s.B - step_theta_reg*grad_B;
-                    s.c = s.c - step_theta_reg*grad_c;
-                    s.X = max(0, s.X - step_X*grad_X);
+                    X = max(0, s.X - step_X*grad_X);
                 end
             elseif strcmp(s.activation, 'leakyReLU')
-                s.X = (s.A'*s.A + s.L2reg*eye(s.h)) \ s.A' * (s.Y_train - s.B*s.U_train - s.c*ones(1,s.m));
+                X = (s.A'*s.A + s.L2reg*eye(s.h)) \ s.A' * (s.Y_train - s.B*s.U_train - s.c*ones(1,s.m));
             end
         end
         
@@ -210,50 +250,68 @@ classdef ImplicitDeepLearning
             else
                 lam = s.lambda;
             end
-            
             fvals = NaN*zeros(num_iter+1,1);
-            fvals(1) = s.utils.scalar_fenchel_divergence(s.X,  s.D* s.X + s.E*s.U_train + s.f*ones(1, s.m) , lam); fval_prev=fvals(1)+1;
             D_prev = s.D; E_prev = s.E; f_prev = s.f;
             iter=1;
-            if strcmp(method, 'classic_gradient')
-                while iter <= num_iter && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision
-                    fval_prev = fvals(iter);
-                    [grad_D, grad_E, grad_f] =  s.gradient_parameters_hid;
+            if strcmp(s.activation, 'ReLU')
+                fvals(1) = s.utils.scalar_fenchel_divergence(s.X,  s.D* s.X + s.E*s.U_train + s.f*ones(1, s.m) , lam); 
+                fval_prev=fvals(1)+1;
+                if strcmp(method, 'classic_gradient')
+                    while iter <= num_iter && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision
+                        fval_prev = fvals(iter);
+                        [grad_D, grad_E, grad_f] =  s.gradient_parameters_hid;
+                        step_theta_hid = s.step_size_parameters_hid;
+                        s.D = s.well_posedness_projection(s.D - step_theta_hid*grad_D, s.radius);
+                        s.E = s.E - step_theta_hid*grad_E;
+                        s.f = s.f - step_theta_hid*grad_f;
+                        iter = iter+1;
+                        fvals(iter) = s.utils.scalar_fenchel_divergence(s.X, s.D* s.X + s.E*s.U_train + s.f*ones(1, s.m), lam);
+                    end
+                    
+                elseif strcmp(method, 'armijo_gradient')
+                    % initialize the step size
+                    step = 100*s.step_size_parameters_hid;
+                    c_armijo = 10^-4;
+                    step_divide = 2;
+                    while iter <= num_iter && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision
+                        fval_prev = fvals(iter);
+                        armijo_condition = false;
+                        [grad_D, grad_E, grad_f] =  s.gradient_parameters_hid;
+                        norm_gradient_square = norm(grad_D, 'fro')^2 + norm(grad_E, 'fro')^2 + norm(grad_f)^2;
+                        step_new = step;
+                        while armijo_condition == false
+                            D_new = s.well_posedness_projection(s.D - step_new*grad_D, s.radius);
+                            E_new = s.E - step_new*grad_E;
+                            f_new = s.f - step_new*grad_f;
+                            fval_new = s.utils.scalar_fenchel_divergence(s.X, D_new* s.X + E_new*s.U_train + f_new*ones(1, s.m), lam);
+                            armijo_condition = (fval_new < fval_prev - c_armijo * step_new * norm_gradient_square) ;
+                            step_new = step_new/step_divide;
+                        end
+                        step = step_new * step_divide^2;
+                        s.D = D_new;
+                        s.E = E_new;
+                        s.f = f_new;
+                        iter = iter+1;
+                        fvals(iter) = fval_new;
+                    end
+                end
+                
+
+            elseif strcmp(s.activation, 'leakyReLU')
+                fvals(1) = s.utils.L2_implicit_constraint(s.X, s.D * s.X + s.E * s.U_train + s.f *ones(1, s.m), s.activation);
+                fval_prev=fvals(1)+1;
+                while iter <= num_iter  && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision
+                    [grad_D, grad_E, grad_f] = s.gradient_parameters_hid;
                     step_theta_hid = s.step_size_parameters_hid;
                     s.D = s.well_posedness_projection(s.D - step_theta_hid*grad_D, s.radius);
                     s.E = s.E - step_theta_hid*grad_E;
                     s.f = s.f - step_theta_hid*grad_f;
-                    iter = iter+1;
-                    fvals(iter) = s.utils.scalar_fenchel_divergence(s.X, s.D* s.X + s.E*s.U_train + s.f*ones(1, s.m), lam);
+                    iter = iter +1;
+                    fvals(iter) = s.utils.L2_implicit_constraint(s.X, s.D * s.X + s.E * s.U_train + s.f *ones(1, s.m), s.activation);
                 end
                 
-            elseif strcmp(method, 'armijo_gradient')
-                % initialize the step size
-                step = 100*s.step_size_parameters_hid;
-                c_armijo = 10^-4;
-                step_divide = 2;
-                while iter <= num_iter && fvals(iter) > s.precision && abs(fvals(iter) - fval_prev) > s.precision
-                    fval_prev = fvals(iter);
-                    armijo_condition = false;
-                    [grad_D, grad_E, grad_f] =  s.gradient_parameters_hid;
-                    norm_gradient_square = norm(grad_D, 'fro')^2 + norm(grad_E, 'fro')^2 + norm(grad_f)^2;
-                    step_new = step;
-                    while armijo_condition == false
-                        D_new = s.well_posedness_projection(s.D - step_new*grad_D, s.radius);
-                        E_new = s.E - step_new*grad_E;
-                        f_new = s.f - step_new*grad_f;
-                        fval_new = s.utils.scalar_fenchel_divergence(s.X, D_new* s.X + E_new*s.U_train + f_new*ones(1, s.m), lam);
-                        armijo_condition = (fval_new < fval_prev - c_armijo * step_new * norm_gradient_square) ;
-                        step_new = step_new/step_divide;
-                    end
-                    step = step_new * step_divide^2;
-                    s.D = D_new;
-                    s.E = E_new;
-                    s.f = f_new;
-                    iter = iter+1;
-                    fvals(iter) = fval_new;
-                end
             end
+            
             if nargout == 3
                 diff = sqrt(norm(s.D - D_prev, 'fro')^2 + norm(s.E - E_prev, 'fro')^2 + norm(s.f - f_prev)^2);
             end

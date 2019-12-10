@@ -344,9 +344,13 @@ classdef UtilitiesIDL
             fval = (1/m)*(0.5*sum(U.^2,2)+0.5*sum(max(0,V).^2,2)-sum(U.*V,2));
         end
         
-        function val = L2_implicit_constraint(U,V)
+        function val = L2_implicit_constraint(U,V, activation)
             m = size(U,2);
-            val = (1/sqrt(m))*norm(U-max(0,V),'fro');
+            if strcmp(activation, 'ReLU')
+                val = (1/sqrt(m))*norm(U-max(0,V),'fro');
+            else
+                val = (1/sqrt(m))*norm(U-max(0,V),'fro');
+            end
         end
         
         % one hot encoding for categorical datasets
