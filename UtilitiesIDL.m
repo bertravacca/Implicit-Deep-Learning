@@ -8,7 +8,7 @@ classdef UtilitiesIDL
         function s=UtilitiesIDL
         end
         
-        % projections
+        %% Projections 
         function D=infty_norm_projection(s,D,radius)
             [h,~]=size(D);
             for j=1:h
@@ -16,6 +16,7 @@ classdef UtilitiesIDL
             end
         end
         
+        % (!!! not sur this works !!!)
         function [A,D]=lmi_projection(s,A,D,lambda)
             if norm(lambda)>0
                 A_init=A;
@@ -32,70 +33,6 @@ classdef UtilitiesIDL
                 norm(D)<=1-prec
                 cvx_end
             end
-        end
-        
-        % compute implicit X
-        function X=picard_iterations(s,U,D,E,f, activation)
-            [h,~]=size(D);
-            [~,m]=size(U);
-            X=rand(h,m)-0.5;
-            k=1;
-            if strcmp(activation, 'ReLU')
-                while k<10^3 && norm(X-max(0,D*X+E*U+f*ones(1,m)),'fro')>s.precision
-                    X=max(0,D*X+E*U+f*ones(1,m));
-                    k=k+1;
-                end
-            elseif strcmp(activation, 'leakyReLU')
-                while k<10^3 && norm(X-s.leakyReLU(D*X+E*U+f*ones(1,m)),'fro')>s.precision
-                    X=s.leakyReLU(D*X+E*U+f*ones(1,m));
-                    k=k+1;
-                end
-            end
-            if k>=10^3
-                disp('picard iterations were not able to find a solution X to the implicit model within 1,000 iterations')
-            end
-
-        end
-        
-        % generate random orthogonal matrix
-        function M=RandOrthMat(s,n)
-            % (c) Ofek Shilon , 2006.
-            tol=s.precision;
-            if nargin==1
-                tol=1e-6;
-            end
-            M = zeros(n); 
-            % gram-schmidt on random column vectors
-            vi = randn(n,1);
-            % the n-dimensional normal distribution has spherical symmetry, which implies
-            % that after normalization the drawn vectors would be uniformly distributed on the
-            % n-dimensional unit sphere.
-            M(:,1) = vi ./ norm(vi);
-            for i=2:n
-                nrm = 0;
-                while nrm<tol
-                    vi = randn(n,1);
-                    vi = vi -  M(:,1:i-1)  * ( M(:,1:i-1).' * vi )  ;
-                    nrm = norm(vi);
-                end
-                M(:,i) = vi ./ nrm;
-            end
-        end
-        
-        % compute the RMSE given model parameters
-        function out=RMSE_actual_implicit(s,A,B,c,D,E,f,U,Y, activation)
-            X=s.picard_iterations(U,D,E,f, activation);
-            out=sqrt(s.MSE_implicit_objective(X,A,B,c,U,Y));
-        end
-        
-        % full objective for implicit deep learning
-        function fval = implicit_objective(s,X, A, B, c, D, E, f, U, Y, lambda)
-             [h,m]=size(X);
-            fval = s.MSE_implicit_objective(X, A, B, c, U, Y)+(lambda.*ones(h,1))'* s.fenchel_divergence(X, D*X+E*U+f*ones(1,m));
-        end
-         
-        function fval = scalar_fenchel_divergence(s,U, V, lambda)
-            fval=s.fenchel_divergence(U, V)'*lambda;
         end
         
         % vector projection on the L1 ball
@@ -230,9 +167,197 @@ classdef UtilitiesIDL
             
         end
         
+        %% Picard Iteration
+        function [X, num_iter]=picard_iterations(s, U, D, E, f, activation_type)
+            [h,~]=size(D);
+            [~,m]=size(U);
+            X=rand(h,m)-0.5;
+            k=1;
+            while k<10^3 && norm( X - s.activation( D * X + E * U + f * ones(1,m), activation_type),'fro')>s.precision
+                X = s.activation( D * X + E * U + f * ones(1,m) , activation_type);
+                k=k+1;
+            end    
+            if k>=10^3
+                disp('picard iterations were not able to find a solution X to the implicit model within 1,000 iterations')
+            end
+            if nargout == 2
+                num_iter = k-1;
+            end
+        end
+        
+        %% Gradients and step
+        function [gradX, step] = gradient_X_mse_loss_fenchel(s, U, Y, X, A, B, c, D, E, f, lambda, activation_type, L2reg, L1reg)
+            m = size(U,2);
+            if norm(lambda)>0
+                Lam = diag( lambda );
+                c_1 =  A' * ( A * X + B * U + c * ones(1 ,m) - Y );
+                c_2 = ( Lam - Lam * D - D' * Lam) * X; 
+                c_3 = D' * Lam * s.activation( D * X +  E * U + f * ones(1, m), activation_type);
+                c_4 =  -Lam * (E * U + f * ones(1,m));
+                gradX = (1/m)*( c_1 + c_2 + c_3 + c_4)' + L2reg * X + L1reg * sign(X);
+                if nargout == 2
+                    step = m/( norm( A' * A + Lam - Lam * D + D' * Lam ) + max( lambda ) * norm( D )^2 +L2reg);
+                end
+            else
+                 gradX = (1/m)*(A' * ( A * X + B * U + c * ones(1, m) - Y));
+                 if nargout == 2
+                     step = m/( norm( A' * A ) + L2reg);
+                 end
+            end
+        end
+            
+        function [grad_A, grad_B, grad_c, step] = gradient_parameters_mse_loss(s, U, Y, X, A, B, c, L2reg, L1reg)
+            m = size(U,2);
+            Cst = (1/m) * (A * X + B* U + c * ones(1, m) - Y);
+            grad_A = Cst * X' + L2reg * A + L1reg * sign(A);
+            grad_B = Cst * U' + L2reg * B + L1reg * sign(B);
+            grad_c = Cst * ones(m,1) + L2reg * c + L1reg * sign(c);
+            if nargout == 4
+                step = m/max([m, norm(X)^2, norm(U)^2, norm(X*U')] + L2reg);
+            end
+        end
+        
+        function [grad_D, grad_E, grad_f, step] = gradient_hidden_parameters_fenchel(s, U, X, D, E, f, lambda, activation_type, L2reg, L1reg)
+            m = size(U,2);
+            if norm(lambda)>0
+                Cst = diag(lambda) * (1/m) * ( activation( D * X + E * U + f * ones(1, m), activation_type) - X ) ;
+                if nargout == 4
+                    step = m / ( max( lambda ) * max( [ m, norm( X )^2, norm( U )^2 , norm( U )*norm(X) ] ) +L2reg);
+                end
+            else
+                Cst = (1/m) * (max(0,s.D * s.X + s.E * s.U_train + s.f * ones(1,s.m)) - s.X);
+                if nargout == 4
+                    step = m / (  max( [ m, norm( X )^2, norm( U )^2 , norm( U )*norm(X) ] ) +L2reg);
+                end
+            end
+            grad_D = Cst * X' + L2reg * D + L1reg * sign(D);
+            grad_E = Cst * U' + L2reg * E + L1reg * sign(E);
+            grad_f = Cst * ones(m,1) + L2reg * f + L1reg * sign(f);
+        end
+            
+        function [grad_D, grad_E, grad_f, step] = gradient_hidden_parameters_linear(s, U, X, D, E, f, activation_type, L2reg, L1reg)
+            m = size(U,2);
+            Cst = (1/m) * (D * X + E * U + f * ones(1, m)  - s.inverse_activation(X, activation_type)) ;
+            grad_D = Cst * X' + L2reg * D + L1reg * sign(D);
+            grad_E = Cst * U'+ L2reg * E + L1reg *sign(E);
+            grad_f = Cst * ones(m, 1) + L2reg * f + L1reg * sign(f);
+            step = m / ( max( [ m, norm(X)^2, norm(U)^2, norm(U)*norm(X)] ) + L2reg );
+        end
+       
+        %% Gradient updates
+        function lambda = dual_update(s, U, X, D, E, f, lambda, dual_step)
+            F_star = s.fenchel_divergence( X, D * X + E * U + f * ones(1, m) );
+            v = 1*( F_star> tolerance );
+            lambda = lambda + dual_step * v;
+        end
+        
+        function X = gradient_update_X_mse_loss_fenchel (s, U, Y, X, A, B, c, D, E, f, lambda, activation_type, L2reg, L1reg)
+            [gradX, step] = s.gradient_X_mse_loss_fenchel(U, Y, X, A, B, c, D, E, f, activation_type, lambda, L2reg, L1reg);
+            X = X - step * gradX;
+            if strcmp(activation_type, 'ReLU')
+                X = max(0, X);
+            end
+        end
+            
+        function [A, B, c] = gradient_update_parameters_mse_loss(s, U, Y, X, A, B, c, L2reg, L1reg)
+            [grad_A, grad_B, grad_c, step] = s.gradient_parameters_mse_loss(U, Y, X, A, B, c, L2reg, L1reg);
+            A = A - step * grad_A;
+            B = B - step * grad_B;
+            c = c - step * grad_c;
+        end
+        
+        function [D, E, f] = gradient_update_hidden_parameters_fenchel(s, U, X, D, E, f, lambda, activation_type, wp_type, L2reg, L1reg)
+            [grad_D, grad_E, grad_f, step] = gradient_hidden_parameters_fenchel(s, U, X, D, E, f, activation_type, lambda, L2reg, L1reg);
+            D = D - step * grad_D;
+            E = E - step * grad_E;
+            f = f - step * grad_f;
+            if strcmp(wp_type, 'infty')
+                D = s.infty_norm_projection(D, 0.5);
+            end
+        end
+        
+        function [D, E, f] = gradient_update_hidden_parameters_linear(s, U, X, D, E, f, activation_type, wp_type, L2reg, L1reg)
+            [grad_D, grad_E, grad_f, step] = gradient_hidden_parameters_linear(s, U, X, D, E, f, activation_type, L2reg, L1reg);
+            step = step;
+            D = D - step * grad_D;
+            E = E - step * grad_E;
+            f = f - step * grad_f;
+            if strcmp(wp_type, 'infty')
+                D = s.infty_norm_projection(D, 0.5);
+            end
+        end
+        
+        %% Activation
+        function out = activation(s, z, activation_type)
+            if strcmp(activation_type, 'ReLU')
+                out = s.ReLU(z);
+            elseif strcmp(activation_type, 'leakyReLU')
+                out = s.leakyReLU(z);
+            end
+        end
+        
+        function out = inverse_activation(s, z, activation_type)
+            if strcmp(activation_type, 'ReLU')
+                error('ReLU is not bijective, cannot use the linear method for learning the hidden parameters')
+            elseif strcmp(activation_type, 'leakyReLU')
+                out = s.inverse_leakyReLU(z);
+            end
+        end
+        
+        %% Scores and errors
+        function val = L2_implicit_constraint_error(s, U,V, activation_type)
+            m = size(U,2);
+            val = (1/sqrt(m))*norm(U-s.activation(V, activation_type),'fro');
+        end
+        
+        function val = score(s, U, Y, A, B, c, D, E, f, activation_type, loss_type)
+            m = size(U, 2);
+            X = s.picard_iterations(U, D, E, f, activation_type);
+            if strcmp(loss_type, 'mse')
+                val = rmse(Y, A * X + B* U + c * ones(1, m));
+            end
+        end
+        
+        function val = fval_X(s, U, Y, X, A, B, c, D, E, f, lambda, method)
+            m = size(U, 2);
+            if strcmp(method, 'linear')
+                val = s.rmse(Y, A * X + B* U + c * ones(1,m) );
+            elseif strcmp(method, 'fenchel')
+                val =  s.rmse(Y, A * X + B* U + c * ones(1,m) )^2 +  scalar_fenchel_divergence( X, D * X + E* U + f *ones(1, m), lambda) ;
+            end
+        end
+        
+        %% Miscellanous
+        % generate random orthogonal matrix
+        function M=RandOrthMat(s,n)
+            % (c) Ofek Shilon , 2006.
+            tol=s.precision;
+            if nargin==1
+                tol=1e-6;
+            end
+            M = zeros(n); 
+            % gram-schmidt on random column vectors
+            vi = randn(n,1);
+            % the n-dimensional normal distribution has spherical symmetry, which implies
+            % that after normalization the drawn vectors would be uniformly distributed on the
+            % n-dimensional unit sphere.
+            M(:,1) = vi ./ norm(vi);
+            for i=2:n
+                nrm = 0;
+                while nrm<tol
+                    vi = randn(n,1);
+                    vi = vi -  M(:,1:i-1)  * ( M(:,1:i-1).' * vi )  ;
+                    nrm = norm(vi);
+                end
+                M(:,i) = vi ./ nrm;
+            end
+        end
+        
+
     end
     
     methods(Static)
+        %% Visualize
         function [] = visualize_algo_init(fval_X, fval_hidden_param)
             figure()
             subplot(2,1,1)
@@ -263,7 +388,7 @@ classdef UtilitiesIDL
             
             subplot(2,1,2)
             semilogx(rmse, 'r', 'LineWidth',0.5)
-            title('Evolution of RMSE across iterations')
+            title('Evolution of rmse across iterations')
             xlabel('iterations')
 
         end
@@ -285,11 +410,44 @@ classdef UtilitiesIDL
             if iter == 1
                 hold on
             end
-            title('Evolution of RMSE across iterations')
+            title('Evolution of rmse across iterations')
             xlabel('iterations')
-            legend('objective implicit', 'RMSE')
+            legend('objective implicit', 'rmse')
         end
-
+        
+        %% Distance 
+        % rmse distance
+        function out=rmse(Y_1, Y_2)
+            [~,m]=size(Y_1);
+            out=(1/sqrt(m))*norm(Y_1-Y_2,'fro');
+        end
+        
+        % fenchel divergence (vector)
+        function fval = fenchel_divergence(U, V)
+            m = size(U, 2);
+            fval = (1/m)*(0.5*sum(U.^2,2)+0.5*sum(max(0,V).^2,2)-sum(U.*V,2));
+        end
+        
+        % scalar fenchel divergence (vector)
+        function fval = scalar_fenchel_divergence(U, V, lambda)
+            m = size(U, 2);
+            fval = lambda' * (1/m)*(0.5*sum(U.^2,2)+0.5*sum(max(0,V).^2,2)-sum(U.*V,2));
+        end
+        
+        %% Activations 
+        function out = ReLU(z)
+            out = max(0, z);
+        end
+        
+        function out = leakyReLU(z)
+            out = max(0,z) + 0.5 * min(0,z);
+        end
+        
+        function out = inverse_leakyReLU(z)
+            out = max(0, z) + 2* min(0, z);
+        end
+        
+        %% Miscellanous
         function [sol,iter] = one_projector(x,weight,tau)
             % This code is partly borrowed from the SPGL toolbox
             % Initialization
@@ -324,33 +482,18 @@ classdef UtilitiesIDL
             sol(idx(1:ii-1)) = x(1:ii-1) - weight(1:ii-1) * max(0,soft);
             
             % Set number of iterations
-            iter = ii;      
+            iter = ii;
         end
         
-        % just compute RMSE
-        function out=RMSE(Y_1, Y_2)
-            [~,m]=size(Y_1);
-            out=(1/sqrt(m))*norm(Y_1-Y_2,'fro');
-        end
-        
-        % compute the MSE, given X (not considering satisfaction of the implicit constraint)
-        function fval=MSE_implicit_objective(X, A, B, c, U, Y)
-            [~,m]=size(U);
-            fval=(1/m)*norm(A*X+B*U+c*ones(1,m)-Y,'fro')^2;
-        end
-        
-        function fval = fenchel_divergence(U, V)
+        % divive data in training and validation
+        function [U_trn, Y_trn, U_val, Y_val, seed] = divide_data(U, Y, ratio)
             m = size(U, 2);
-            fval = (1/m)*(0.5*sum(U.^2,2)+0.5*sum(max(0,V).^2,2)-sum(U.*V,2));
-        end
-        
-        function val = L2_implicit_constraint(U,V, activation)
-            m = size(U,2);
-            if strcmp(activation, 'ReLU')
-                val = (1/sqrt(m))*norm(U-max(0,V),'fro');
-            else
-                val = (1/sqrt(m))*norm(U-max(0,V),'fro');
-            end
+            seed = randperm(m);
+            m_trn = ceil(ratio * m);
+            U_trn = U(:, seed(1:m_trn));
+            Y_trn = Y(:, seed(1:m_trn));
+            U_val = U(:, seed(m_trn+1:m));
+            Y_val = Y(:, seed(m_trn+1:m));
         end
         
         % one hot encoding for categorical datasets
@@ -444,13 +587,180 @@ classdef UtilitiesIDL
             
         end
         
-        function out = leakyReLU(z)
-            out = max(0,z) + 0.5 * min(0,z);
+        % solving basis pursuit with ADMM
+        function [z, history] = basis_pursuit(A, b, rho, alpha)
+            % basis_pursuit  Solve basis pursuit via ADMM
+            %
+            % [x, history] = basis_pursuit(A, b, rho, alpha)
+            %
+            % Solves the following problem via ADMM:
+            %
+            %   minimize     ||x||_1
+            %   subject to   Ax = b
+            %
+            % The solution is returned in the vector x.
+            %
+            % history is a structure that contains the objective value, the primal and
+            % dual residual norms, and the tolerances for the primal and dual residual
+            % norms at each iteration.
+            %
+            % rho is the augmented Lagrangian parameter.
+            %
+            % alpha is the over-relaxation parameter (typical values for alpha are
+            % between 1.0 and 1.8).
+            %
+            % More information can be found in the paper linked at:
+            % http://www.stanford.edu/~boyd/papers/distr_opt_stat_learning_admm.html
+            %
+            
+            t_start = tic;
+            QUIET    = 0;
+            MAX_ITER = 1000;
+            ABSTOL   = 1e-6;
+            RELTOL   = 1e-6;
+
+            [m n] = size(A);
+
+            x = zeros(n,1);
+            z = zeros(n,1);
+            u = zeros(n,1);
+            
+            if ~QUIET
+                fprintf('%3s\t%10s\t%10s\t%10s\t%10s\t%10s\n', 'iter', ...
+                    'r norm', 'eps pri', 's norm', 'eps dual', 'objective');
+            end
+            
+            % precompute static variables for x-update (projection on to Ax=b)
+            AAt = A*A';
+            P = eye(n) - A' * (AAt \ A);
+            q = A' * (AAt \ b);
+            
+            for k = 1:MAX_ITER
+                % x-update
+                x = P*(z - u) + q;
+                
+                % z-update with relaxation
+                zold = z;
+                x_hat = alpha*x + (1 - alpha)*zold;
+                z = max(0, x_hat + u - 1/rho) - max(0, - x_hat -u -1/rho);
+                u = u + (x_hat - z);
+                
+                % diagnostics, reporting, termination checks
+                history.objval(k)  = norm(x, 1);
+                
+                history.r_norm(k)  = norm(x - z);
+                history.s_norm(k)  = norm(-rho*(z - zold));
+                
+                history.eps_pri(k) = sqrt(n)*ABSTOL + RELTOL*max(norm(x), norm(-z));
+                history.eps_dual(k)= sqrt(n)*ABSTOL + RELTOL*norm(rho*u);
+                
+                if ~QUIET
+                    fprintf('%3d\t%10.4f\t%10.4f\t%10.4f\t%10.4f\t%10.2f\n', k, ...
+                        history.r_norm(k), history.eps_pri(k), ...
+                        history.s_norm(k), history.eps_dual(k), history.objval(k));
+                end
+                
+                if (history.r_norm(k) < history.eps_pri(k) && ...
+                        history.s_norm(k) < history.eps_dual(k))
+                    break;
+                end
+            end
+            
+            if ~QUIET
+                toc(t_start);
+            end
         end
         
-        function out = inverse_leakyReLU(z)
-            out = max(0, z) + 2* min(0, z);
+        % solving extended basis pursuit with ADMM
+        function [x, y, history] = extended_basis_pursuit(A, B, c,  rho, alpha)
+            % basis_pursuit  Solve basis pursuit via ADMM
+            %
+            % [x, history] = extended_basis_pursuit(A, b, rho, alpha)
+            %
+            % Solves the following problem via ADMM:
+            %
+            %   minimize_{x,y}     ||x||_1
+            %   subject to   Ax + By = c
+            %
+            % The solution is returned in the vector pair (x, y).
+            %
+            % history is a structure that contains the objective value, the primal and
+            % dual residual norms, and the tolerances for the primal and dual residual
+            % norms at each iteration.
+            %
+            % rho is the augmented Lagrangian parameter.
+            %
+            % alpha is the over-relaxation parameter (typical values for alpha are
+            % between 1.0 and 1.8).
+            %
+            % More information can be found in the paper linked at:
+            % http://www.stanford.edu/~boyd/papers/distr_opt_stat_learning_admm.html
+            %
+            
+            t_start = tic;
+            QUIET    = 1;
+            MAX_ITER = 10;
+            ABSTOL   = 1e-6;
+            RELTOL   = 1e-6;
+
+            [~, n] = size(A);
+            [~, p] = size(B);
+            
+            x = zeros(n,1);
+            y = zeros(p,1);
+            z = zeros(n,1);
+            u = zeros(n,1);
+            
+            if ~QUIET
+                fprintf('%3s\t%10s\t%10s\t%10s\t%10s\t%10s\n', 'iter', ...
+                    'r norm', 'eps pri', 's norm', 'eps dual', 'objective');
+            end
+          
+            
+            for k = 1:MAX_ITER
+                % x, y-update
+                H = [eye(n), zeros(n, p); zeros(p, n+p)];
+                f = [u - z; zeros(p,1)];
+                Aeq = [A, B];
+                beq = c;
+                options =  optimset('Display','off');
+                w = quadprog(H, f, [], [], Aeq, beq, [], [], [], options);
+                x = w(1:n);
+                y = w(n+1:n+p);
+                
+                % z-update with relaxation
+                zold = z;
+                x_hat = alpha*x + (1 - alpha)*zold;
+                z = max(0, x_hat + u - 1/rho) - max(0, - x_hat -u -1/rho);
+                u = u + (x_hat - z);
+                
+                % diagnostics, reporting, termination checks
+                history.objval(k)  = norm(x, 1);
+                
+                history.r_norm(k)  = norm(x - z);
+                history.s_norm(k)  = norm(-rho*(z - zold));
+                
+                history.eps_pri(k) = sqrt(n)*ABSTOL + RELTOL*max(norm(x), norm(-z));
+                history.eps_dual(k)= sqrt(n)*ABSTOL + RELTOL*norm(rho*u);
+                history.linear_error(k) = norm(A*x + B*y -c, 2);
+                
+                if ~QUIET
+                    fprintf('%3d\t%10.4f\t%10.4f\t%10.4f\t%10.4f\t%10.2f\n', k, ...
+                        history.r_norm(k), history.eps_pri(k), ...
+                        history.s_norm(k), history.eps_dual(k), history.objval(k));
+                end
+                
+                if (history.r_norm(k) < history.eps_pri(k) && ...
+                        history.s_norm(k) < history.eps_dual(k))
+                    break;
+                end
+            end
+            
+            if ~QUIET
+                toc(t_start);
+            end
         end
+       
 
     end
 end
