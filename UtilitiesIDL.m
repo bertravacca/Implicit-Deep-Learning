@@ -243,6 +243,35 @@ classdef UtilitiesIDL
             grad_f = Cst * ones(m, 1) + L2reg * f + L1reg * sign(f);
             step = m / ( max( [ m, norm(X)^2, norm(U)^2, norm(U)*norm(X)] ) + L2reg );
         end
+        
+        function [grad_D, grad_E, grad_f] = gradient_hidden_parameters_implicit_chain_rule(s, data_index,  U, Y,  X, A, B, c, D, E, f, activation_type)
+            m = size(U, 2);
+            if isempty(data_index)
+                data_index = 1:1:m ;
+            end
+            m_sub = length(data_index); 
+            h = size(X, 1);
+            n = size(U, 1);
+            grad_D = zeros(h, h);
+            grad_E = zeros(h, n);
+            grad_f = zeros(h, 1);
+            for j = 1 : m_sub
+                i = data_index(j);
+                z = D * X(:, i) + E * U(:, i) + f;
+                V = diag( s. elementwise_derivative_activation(z, activation_type));
+                y_pred = A * X(:, i) + B * U(:, i) + c;
+                K =  V * (eye(h) - D' * V) \ (A' * ( y_pred - Y(:, i)));
+                grad_f = grad_f + K;
+                for k = 1 : h
+                    delta = s.kron_delta(k, h);
+                    grad_D(k, :) = grad_D( k, :) + (X(:, i) * delta' * K)';
+                    grad_E(k, :) = grad_E( k, :) + ( U(:, i) * delta' * K)';
+                end
+            end
+            grad_D = (1/m_sub) * grad_D;
+            grad_E = (1/m_sub) * grad_E;
+            grad_f = (1/m_sub) * grad_f;
+        end
        
         %% Gradient updates
         function lambda = dual_update(s, U, X, D, E, f, lambda, dual_step)
@@ -259,8 +288,12 @@ classdef UtilitiesIDL
             end
         end
             
-        function [A, B, c] = gradient_update_parameters_mse_loss(s, U, Y, X, A, B, c, L2reg, L1reg)
-            [grad_A, grad_B, grad_c, step] = s.gradient_parameters_mse_loss(U, Y, X, A, B, c, L2reg, L1reg);
+        function [A, B, c] = gradient_update_parameters_mse_loss(s, U, Y, X, A, B, c, L2reg, L1reg, step)
+            if nargin == 9
+                [grad_A, grad_B, grad_c, step] = s.gradient_parameters_mse_loss(U, Y, X, A, B, c, L2reg, L1reg);
+            else
+                [grad_A, grad_B, grad_c, ~] = s.gradient_parameters_mse_loss(U, Y, X, A, B, c, L2reg, L1reg);
+            end
             A = A - step * grad_A;
             B = B - step * grad_B;
             c = c - step * grad_c;
@@ -287,6 +320,17 @@ classdef UtilitiesIDL
             end
         end
         
+        function [D, E, f] = gradient_update_hidden_parameters_implicit_chain_rule(s, data_index,  U, Y,  X, A, B, c, D, E, f, activation_type, wp_type,  step)
+            [grad_D, grad_E, grad_f] = s.gradient_hidden_parameters_implicit_chain_rule(data_index,  U, Y,  X, A, B, c, D, E, f, activation_type);
+            D = D - step * grad_D;
+            E = E - step * grad_E;
+            f = f - step * grad_f;
+
+            if strcmp(wp_type, 'infty')
+                D = s.infty_norm_projection(D, 0.5);
+            end
+        end
+        
         %% Activation
         function out = activation(s, z, activation_type)
             if strcmp(activation_type, 'ReLU')
@@ -303,6 +347,7 @@ classdef UtilitiesIDL
                 out = s.inverse_leakyReLU(z);
             end
         end
+      
         
         %% Scores and errors
         function val = L2_implicit_constraint_error(s, U,V, activation_type)
@@ -445,6 +490,14 @@ classdef UtilitiesIDL
         
         function out = inverse_leakyReLU(z)
             out = max(0, z) + 2* min(0, z);
+        end
+        
+        function out = elementwise_derivative_activation(z, activation_type)
+            if strcmp(activation_type, 'ReLu')
+                out = 1 * ( z > 0 );
+            elseif strcmp(activation_type, 'leakyReLU')
+                out = 1* ( z > 0 ) + 0.5 * ( z < 0 );
+            end
         end
         
         %% Miscellanous
@@ -760,7 +813,12 @@ classdef UtilitiesIDL
                 toc(t_start);
             end
         end
-       
+        
+        % Kronecker delta vector
+        function out = kron_delta(k, m)
+            out = zeros(m,1);
+            out(k) = 1;
+        end
 
     end
 end

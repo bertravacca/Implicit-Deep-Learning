@@ -58,7 +58,7 @@ classdef ImplicitDeepLearning
         
         %% Implicit training
         function s = train(s)
-            trial = 2;
+            trial = 4;
             if trial == 1
                     m_trn = size(s.U.trn, 2);
                     m_val = size(s.U.val, 2);
@@ -208,6 +208,33 @@ classdef ImplicitDeepLearning
                 s.X.trn = X_new;
                 disp('RMSE')
                 disp(s.utils.rmse(s.Y.trn, s.A * s.X.trn + s.B * s.U.trn + s.c * ones(1, m_trn)))
+                
+            elseif trial == 4
+                m_trn = size(s.U.trn, 2);
+                m_val = size(s.U.val, 2);
+                s = s.parameter_initialization;
+                s.X.trn = s.utils.picard_iterations(s.U.trn, s.D, s.E, s.f, s.activation_type);
+                step= 10^-3;
+                num_iter = 100;
+                disp('Initial RMSE')
+                disp(s.utils.rmse(s.Y.trn, s.A * s.X.trn + s.B * s.U.trn + s.c * ones(1, m_trn)))
+                
+                rmse = NaN * zeros(num_iter, 1);
+
+                for iter = 1: 200
+                    [s.D, s.E, s.f] = s.utils.gradient_update_hidden_parameters_implicit_chain_rule([],  s.U.trn, s.Y.trn,  s.X.trn, s.A, s.B, s.c, s.D, s.E, s.f, s.activation_type, s.wp_type,step);
+                    s.X.trn = s.utils.picard_iterations(s.U.trn, s.D, s.E, s.f, s.activation_type);
+                    rmse(iter) = s.utils.rmse(s.Y.trn, s.A * s.X.trn + s.B * s.U.trn + s.c * ones(1, m_trn));
+                    if rmse(iter)>10^3
+                        error(['Not working, stopped at iteration' , num2str(iter)])
+                    end
+                end
+                
+                [s.A, s.B, s.c] = s.block_update_parameters_mse_loss;
+                disp(' Final RMSE')
+                disp(s.utils.rmse(s.Y.trn, s.A * s.X.trn + s.B * s.U.trn + s.c * ones(1, m_trn)))
+                
+                plot(rmse)
             end
         end
 
